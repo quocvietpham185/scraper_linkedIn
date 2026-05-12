@@ -1,0 +1,143 @@
+# =====================================================================
+# .gitignore — LinkedIn Scraper Monorepo
+# Covers: linkedin_group_crawler / linkedin-crawler-ui / vietpq-private-proxy
+# =====================================================================
+
+
+# ─────────────────────────────────────────────
+# OS / IDE
+# ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+
+# ─────────────────────────────────────────────
+# BACKEND — linkedin_group_crawler (Python / FastAPI)
+# ─────────────────────────────────────────────
+
+# Môi trường ảo
+linkedin_group_crawler/.venv/
+linkedin_group_crawler/venv/
+linkedin_group_crawler/env/
+
+# Python cache (recursive)
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+**/.Python
+
+# Test / Lint cache
+linkedin_group_crawler/.pytest_cache/
+linkedin_group_crawler/.mypy_cache/
+linkedin_group_crawler/.ruff_cache/
+linkedin_group_crawler/htmlcov/
+linkedin_group_crawler/.coverage
+linkedin_group_crawler/coverage.xml
+
+# ⚠️ Secrets & credentials — KHÔNG được commit
+linkedin_group_crawler/.env
+linkedin_group_crawler/.env.*
+!linkedin_group_crawler/.env.example
+linkedin_group_crawler/credentials.json
+linkedin_group_crawler/service_account*.json
+linkedin_group_crawler/google_credentials*.json
+linkedin_group_crawler/token.json
+
+# LinkedIn session states (chứa cookie đăng nhập)
+linkedin_group_crawler/storage/session/
+linkedin_group_crawler/storage/sessions/
+linkedin_group_crawler/storage/*.json
+linkedin_group_crawler/storage/runtime/
+linkedin_group_crawler/*.session
+linkedin_group_crawler/*.session-journal
+
+# Runtime data (tự sinh khi chạy)
+linkedin_group_crawler/crawl_tasks.json
+linkedin_group_crawler/data/live_feed.db
+linkedin_group_crawler/data/raw/
+linkedin_group_crawler/data/output/
+linkedin_group_crawler/data/storage/
+
+# Debug artifacts (screenshot & HTML dump)
+linkedin_group_crawler/**/*.png
+linkedin_group_crawler/**/*.html
+
+# Scratch / utility scripts không cần lên repo
+linkedin_group_crawler/scratch/
+
+# Build
+linkedin_group_crawler/dist/
+linkedin_group_crawler/*.egg-info/
+linkedin_group_crawler/build/
+
+
+# ─────────────────────────────────────────────
+# FRONTEND — linkedin-crawler-ui (Next.js / TypeScript)
+# ─────────────────────────────────────────────
+
+linkedin-crawler-ui/node_modules/
+linkedin-crawler-ui/.next/
+linkedin-crawler-ui/out/
+linkedin-crawler-ui/build/
+linkedin-crawler-ui/coverage/
+linkedin-crawler-ui/.vercel/
+linkedin-crawler-ui/.turbo/
+
+# TypeScript build info
+linkedin-crawler-ui/*.tsbuildinfo
+linkedin-crawler-ui/next-env.d.ts
+
+# npm/yarn/pnpm logs
+linkedin-crawler-ui/npm-debug.log*
+linkedin-crawler-ui/yarn-debug.log*
+linkedin-crawler-ui/yarn-error.log*
+linkedin-crawler-ui/.pnpm-debug.log*
+
+# ⚠️ FE env / secrets
+linkedin-crawler-ui/.env
+linkedin-crawler-ui/.env.*
+!linkedin-crawler-ui/.env.example
+
+
+# ─────────────────────────────────────────────
+# PROXY — vietpq-private-proxy (Node.js)
+# ─────────────────────────────────────────────
+
+vietpq-private-proxy/node_modules/
+vietpq-private-proxy/dist/
+vietpq-private-proxy/build/
+vietpq-private-proxy/logs/
+vietpq-private-proxy/.env
+vietpq-private-proxy/.env.*
+!vietpq-private-proxy/.env.example
+vietpq-private-proxy/npm-debug.log*
+vietpq-private-proxy/yarn-debug.log*
+vietpq-private-proxy/*.log
+
+
+# ─────────────────────────────────────────────
+# ROOT / Chung
+# ─────────────────────────────────────────────
+
+# Thư mục tmp tạm thời
+tmp/
+
+# Log files bất kỳ đâu
+*.log
+*.log.*
+
+# Zip / archive
+*.zip
+*.tar.gz
+*.tar.bz2
+
+# Môi trường Docker override local
+docker-compose.override.yml
+.env
