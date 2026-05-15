@@ -27,6 +27,11 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _chunks(items: list[str], size: int) -> list[list[str]]:
+    chunk_size = max(1, size)
+    return [items[index:index + chunk_size] for index in range(0, len(items), chunk_size)]
+
+
 async def run_background_crawl(session_id: str, request: StartWorkflowRequest) -> None:
     group_urls = request.group_urls or []
     total = len(group_urls)
@@ -64,20 +69,47 @@ async def run_background_crawl(session_id: str, request: StartWorkflowRequest) -
         return
 
     if crawler_type == "apify" and settings.apify_own_actor_enabled:
-        logger.info("Start Apify batch crawl: groups=%d email=%s", total, request.email)
-        batch_results = await run_apify_crawler_for_groups(
-            group_urls,
-            email=request.email,
-            max_items=max_posts,
-            target_date=target_date,
-            scroll_times=scroll_times,
-        )
+        batches = _chunks(group_urls, settings.apify_batch_size)
+        batch_results: dict[str, dict] = {}
+        for batch_index, batch_urls in enumerate(batches, start=1):
+            logger.info(
+                "Start Apify actor run batch %d/%d: groups=%d email=%s",
+                batch_index,
+                len(batches),
+                len(batch_urls),
+                request.email,
+            )
+            crawl_task_service.update_task_status(
+                session_id,
+                "running",
+                f"Dang crawl Apify batch {batch_index}/{len(batches)} ({len(batch_urls)} nhom)...",
+            )
+            batch_results.update(
+                await run_apify_crawler_for_groups(
+                    batch_urls,
+                    email=request.email,
+                    max_items=max_posts,
+                    target_date=target_date,
+                    scroll_times=scroll_times,
+                )
+            )
+
+            if batch_index < len(batches):
+                delay_min = min(settings.backend_batch_delay_min_sec, settings.backend_batch_delay_max_sec)
+                delay_max = max(settings.backend_batch_delay_min_sec, settings.backend_batch_delay_max_sec)
+                delay_sec = random.uniform(delay_min, delay_max)
+                logger.info(
+                    "Waiting %.2fs before next Apify actor run batch for account %s",
+                    delay_sec,
+                    request.email,
+                )
+                await asyncio.sleep(delay_sec)
 
         for index, url in enumerate(group_urls):
             crawl_task_service.update_task_status(
                 session_id,
                 "running",
-                f"Dang crawl {index + 1}/{total} nhom bang Apify batch...",
+                f"Dang xu ly ket qua {index + 1}/{total} nhom bang Apify batch...",
             )
 
             try:

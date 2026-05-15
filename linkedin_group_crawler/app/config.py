@@ -241,8 +241,11 @@ class Settings:
     apify_default_scroll_times: int = int(os.getenv("APIFY_DEFAULT_SCROLL_TIMES", "3"))
     apify_delay_min_ms: int = int(os.getenv("APIFY_DELAY_MIN_MS", "5000"))
     apify_delay_max_ms: int = int(os.getenv("APIFY_DELAY_MAX_MS", "12000"))
+    apify_batch_size: int = int(os.getenv("APIFY_BATCH_SIZE", "5"))
     apify_group_delay_min_sec: float = float(os.getenv("APIFY_GROUP_DELAY_MIN_SEC", "300"))
     apify_group_delay_max_sec: float = float(os.getenv("APIFY_GROUP_DELAY_MAX_SEC", "600"))
+    backend_batch_delay_min_sec: float = float(os.getenv("BACKEND_BATCH_DELAY_MIN_SEC", "900"))
+    backend_batch_delay_max_sec: float = float(os.getenv("BACKEND_BATCH_DELAY_MAX_SEC", "1800"))
     apify_proxy_groups: list[str] = field(
         default_factory=lambda: _parse_csv(os.getenv("APIFY_PROXY_GROUPS"), default=("RESIDENTIAL",)),
     )

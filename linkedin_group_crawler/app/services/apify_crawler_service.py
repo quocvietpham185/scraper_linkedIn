@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 APIFY_BASE = "https://api.apify.com/v2"
 _POLL_INTERVAL_SEC = 10
-_POLL_MAX_ATTEMPTS = 72
+_POLL_MAX_ATTEMPTS = 360
 
 ActorKind = Literal["own", "third_party"]
 
