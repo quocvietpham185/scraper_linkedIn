@@ -57,7 +57,11 @@ export type MaterialSymbolName =
   | "link"
   | "sync"
   | "check"
-  | "verified_user";
+  | "verified_user"
+  | "comments_disabled"
+  | "verified"
+  | "task_alt"
+  | "inbox";
 
 export interface MaterialIconProps {
   name: MaterialSymbolName;

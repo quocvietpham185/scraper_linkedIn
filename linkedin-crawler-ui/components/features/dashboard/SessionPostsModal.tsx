@@ -277,8 +277,8 @@ export function SessionPostsModal({
                   ? `Bài ${pageStart + idx + 1} - ${groupNameDetail}`
                   : `Bài ${pageStart + idx + 1}`;
               const postUrl = pickStr(post, [
-                "URL_BÃ i_viáº¿t",
-                "URL BÃ i viáº¿t",
+                "URL_Bài_viết",
+                "URL Bài viết",
                 "url_bai_viet",
                 "post_url",
                 "postUrl",

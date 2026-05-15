@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from playwright.sync_api import Error, Page, sync_playwright
 
 from app.config import settings
-from app.services.auth_service import build_session_state_path
+from app.services.auth_service import build_session_profile_dir, build_session_state_path
 from app.services.parser_service import parse_post_locator
 from app.utils.file_utils import ensure_directory, save_text_file
 from app.utils.logger import get_logger
@@ -193,6 +193,7 @@ def open_group_and_collect_posts(
     """Open a LinkedIn group page, scroll, and parse post data."""
 
     normalized_session_id, state_path = build_session_state_path(session_id=session_id, email=email)
+    _, profile_dir = build_session_profile_dir(session_id=normalized_session_id, email=email)
 
     if not state_path.exists():
         raise FileNotFoundError(
@@ -211,19 +212,35 @@ def open_group_and_collect_posts(
     ensure_directory(settings.raw_data_dir)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(
-            headless=settings.headless,
-            args=[
-                "--disable-gpu",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-infobars",
-                "--disable-crash-reporter",
-                "--disable-web-resources",
-            ],
-        )
-        context = browser.new_context(storage_state=str(state_path))
+        browser = None
+        launch_args = [
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-infobars",
+            "--disable-crash-reporter",
+            "--disable-web-resources",
+        ]
+        if settings.use_persistent_profile and profile_dir.exists():
+            logger.info("Using persistent LinkedIn browser profile: %s", profile_dir)
+            context = playwright.chromium.launch_persistent_context(
+                str(profile_dir),
+                headless=settings.headless,
+                channel="chrome" if not settings.headless else None,
+                args=launch_args,
+            )
+        else:
+            if settings.use_persistent_profile:
+                logger.info(
+                    "Persistent profile missing for session_id '%s'; falling back to storage_state JSON.",
+                    normalized_session_id,
+                )
+            browser = playwright.chromium.launch(
+                headless=settings.headless,
+                args=launch_args,
+            )
+            context = browser.new_context(storage_state=str(state_path))
         page = context.new_page()
 
         try:
@@ -311,4 +328,5 @@ def open_group_and_collect_posts(
             raise RuntimeError(f"{exc}. Screenshot saved to {screenshot_path}") from exc
         finally:
             context.close()
-            browser.close()
+            if browser is not None:
+                browser.close()

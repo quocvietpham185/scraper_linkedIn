@@ -6,7 +6,11 @@ import { usePathname } from "next/navigation";
 
 import { MaterialIcon } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { loginLinkedIn, verifyLinkedInOtp } from "@/services/linkedinCrawlerService";
+import {
+  checkLinkedInSession,
+  loginLinkedIn,
+  verifyLinkedInOtp,
+} from "@/services/linkedinCrawlerService";
 
 import { useDashboard } from "./dashboard-context";
 
@@ -26,6 +30,7 @@ export function DashboardSidebar() {
   const [showPassword, setShowPassword] = useState(false);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [sessionStatusMessage, setSessionStatusMessage] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState("");
   const [pendingOtpSessionId, setPendingOtpSessionId] = useState<string | null>(
     null,
@@ -39,6 +44,7 @@ export function DashboardSidebar() {
     setDraftPassword(d.password);
     setShowPassword(false);
     setAccountError(null);
+    setSessionStatusMessage(null);
     setOtpCode("");
     setPendingOtpSessionId(null);
     setPendingCheckpointUrl(null);
@@ -84,6 +90,37 @@ export function DashboardSidebar() {
     } catch (error) {
       setAccountError(
         error instanceof Error ? error.message : "Cập nhật tài khoản thất bại.",
+      );
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  const checkCurrentSession = async () => {
+    const email = draftEmail.trim() || d.email.trim();
+    if (!email) {
+      setAccountError("Vui lòng nhập email để kiểm tra session.");
+      return;
+    }
+    setAccountBusy(true);
+    setAccountError(null);
+    setSessionStatusMessage(null);
+    try {
+      const response = await checkLinkedInSession({
+        email,
+        verify_live: true,
+      });
+      if (!response.success || !response.data) {
+        throw new Error(response.message || "Không thể kiểm tra session.");
+      }
+      setSessionStatusMessage(
+        response.data.valid
+          ? "Session LinkedIn còn dùng được. Có thể chạy crawl mà không cần nhập lại mật khẩu."
+          : response.message || "Session đã hết hạn. Cần đăng nhập lại.",
+      );
+    } catch (error) {
+      setAccountError(
+        error instanceof Error ? error.message : "Kiểm tra session thất bại.",
       );
     } finally {
       setAccountBusy(false);
@@ -264,8 +301,21 @@ export function DashboardSidebar() {
                 {accountError}
               </div>
             ) : null}
+            {sessionStatusMessage ? (
+              <div className="border-outline-variant bg-surface-container text-on-surface mt-md rounded-lg border px-md py-sm text-body-sm">
+                {sessionStatusMessage}
+              </div>
+            ) : null}
 
             <div className="mt-lg flex justify-end gap-sm">
+              <button
+                type="button"
+                className="text-on-surface-variant rounded-lg px-md py-sm text-sm font-bold uppercase disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void checkCurrentSession()}
+                disabled={accountBusy}
+              >
+                Kiểm tra session
+              </button>
               <button
                 type="button"
                 className="text-on-surface-variant rounded-lg px-md py-sm text-sm font-bold uppercase"

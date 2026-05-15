@@ -250,12 +250,34 @@ def verify_employee_comment(task_id: str, email: str) -> dict[str, Any]:
 
     public_id = task["linkedin_public_id"]
     post_id = task["post_id"]
-    if not public_id:
-        updates = _with_status_columns({"verify_error": "Thieu linkedin_public_id cua nhan vien."}, "failed")
-        _update_task_cells(tab, headers, int(row["_row_number"]), updates)
-        return {**task, **updates}
     if not post_id:
         updates = _with_status_columns({"verify_error": "Thieu post_id va khong parse duoc tu post_url."}, "failed")
+        _update_task_cells(tab, headers, int(row["_row_number"]), updates)
+        return {**task, **updates}
+    if _comment_url_matches_task(task.get("comment_url") or "", post_id):
+        updates = _with_status_columns(
+            {
+                "verified_at": _now_iso(),
+                "comment_id": "",
+                "comment_text": "",
+                "verify_method": "comment_url_post_id_fallback",
+                "verify_error": "",
+            },
+            "verified",
+        )
+        _update_task_cells(tab, headers, int(row["_row_number"]), updates)
+        _, _, refreshed = _find_task_row(task_id, email)
+        return _public_task(refreshed)
+    if not public_id:
+        updates = _with_status_columns(
+            {
+                "verify_error": (
+                    "Thieu linkedin_public_id cua nhan vien. "
+                    "Neu da comment, hay dan link comment dung bai roi bam Verify lai."
+                ),
+            },
+            "failed",
+        )
         _update_task_cells(tab, headers, int(row["_row_number"]), updates)
         return {**task, **updates}
 
@@ -299,17 +321,6 @@ def verify_employee_comment(task_id: str, email: str) -> dict[str, Any]:
                 "comment_text": str(comment.get("comment_text") or "")[:3000],
                 "comment_url": str(comment.get("activity_url") or task.get("comment_url") or ""),
                 "verify_method": "profile_comments",
-                "verify_error": "",
-            },
-            "verified",
-        )
-    elif _comment_url_matches_task(task.get("comment_url") or "", post_id):
-        updates = _with_status_columns(
-            {
-                "verified_at": _now_iso(),
-                "comment_id": "",
-                "comment_text": "",
-                "verify_method": "comment_url_post_id_fallback",
                 "verify_error": "",
             },
             "verified",

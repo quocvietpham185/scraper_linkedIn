@@ -1,0 +1,13 @@
+{
+  "actorSpecification": 1,
+  "name": "linkedin-group-crawler",
+  "title": "LinkedIn Group Crawler",
+  "description": "Crawl LinkedIn group posts with Playwright and output normalized items for the VietPQ crawler backend.",
+  "version": "0.1",
+  "buildTag": "latest",
+  "meta": {
+    "templateId": "js-crawlee-playwright"
+  },
+  "input": "./INPUT_SCHEMA.json",
+  "dockerfile": "../Dockerfile"
+}

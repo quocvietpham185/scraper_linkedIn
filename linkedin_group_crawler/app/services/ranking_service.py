@@ -37,6 +37,23 @@ def enrich_and_filter_posts(
     return filtered_posts, target_day
 
 
+def summarize_post_dates(posts: list[dict[str, Any]], crawl_time: datetime, *, limit: int = 12) -> str:
+    """Return a compact debug summary of parsed post dates."""
+
+    if not posts:
+        return "Không parse được bài nào."
+
+    lines: list[str] = []
+    for index, post in enumerate(posts[:limit], start=1):
+        raw = str(post.get("posted_at_raw") or "").strip() or "(trống)"
+        normalized_dt = normalize_relative_time(raw, crawl_time)
+        normalized = normalized_dt.isoformat(timespec="minutes") if normalized_dt else "không parse được"
+        lines.append(f"{index}. {raw} -> {normalized}")
+    if len(posts) > limit:
+        lines.append(f"... còn {len(posts) - limit} bài khác")
+    return "\n".join(lines)
+
+
 def pick_top_post(posts: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Pick the top post using score, then likes as tie-breaker."""
 

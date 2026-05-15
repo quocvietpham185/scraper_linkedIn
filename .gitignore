@@ -90,6 +90,8 @@ linkedin-crawler-ui/coverage/
 linkedin-crawler-ui/.vercel/
 linkedin-crawler-ui/.turbo/
 
+linkedin-apify-actor/node_modules/
+
 # TypeScript build info
 linkedin-crawler-ui/*.tsbuildinfo
 linkedin-crawler-ui/next-env.d.ts

@@ -203,3 +203,37 @@ VM dang chay Python 3.8, da fix:
 - `@dataclass(slots=True)` -> `@dataclass`
 
 Khuyen nghi dai han: nang cap Python 3.10+.
+
+## 12) Crawl tu dong hang ngay
+
+Script co san: `scripts/daily_cron.py`. Script doc danh sach nhom tu Google Sheet va goi `/start` theo tung email.
+
+Backend `.env` nen co:
+
+```env
+SCHEDULED_CRAWLER_TYPE=auto
+APIFY_TOKEN=...
+APIFY_ACTOR_ID=yourUsername~linkedin-group-crawler
+APIFY_OWN_ACTOR_ENABLED=true
+APIFY_3RD_PARTY_FALLBACK_ENABLED=false
+```
+
+Test thu cong tren VM:
+
+```bash
+cd /opt/apps/vietpq-linkedin-scraper/linkedin_group_crawler
+source .venv/bin/activate
+python scripts/daily_cron.py
+```
+
+Cron moi ngay 08:00:
+
+```cron
+0 8 * * * cd /opt/apps/vietpq-linkedin-scraper/linkedin_group_crawler && . .venv/bin/activate && python scripts/daily_cron.py >> storage/daily_cron.log 2>&1
+```
+
+Luon chay theo tier:
+
+```text
+Playwright local -> Apify Actor tu viet -> optional Actor 3rd party -> error_logs + Telegram
+```

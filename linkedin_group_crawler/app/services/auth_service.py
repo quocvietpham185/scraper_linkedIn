@@ -1,4 +1,4 @@
-"""Authentication service for LinkedIn session management."""
+﻿"""Authentication service for LinkedIn session management."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -85,6 +86,21 @@ class LoginFlowResult:
     checkpoint_url: str | None = None
 
 
+@dataclass
+class SessionStatusResult:
+    """Status of a saved LinkedIn storage-state file."""
+
+    email: str | None
+    session_id: str
+    state_path: Path
+    exists: bool
+    has_auth_cookie: bool
+    valid: bool
+    needs_login: bool
+    live_checked: bool = False
+    message: str = ""
+
+
 _pending_login_sessions: dict[str, PendingLoginSession] = {}
 _pending_login_lock = threading.Lock()
 
@@ -150,6 +166,14 @@ def build_session_state_path(session_id: str | None, email: str | None = None) -
     normalized_session_id = resolve_session_id(session_id=session_id, email=email)
     ensure_directory(settings.session_storage_dir)
     return normalized_session_id, settings.session_storage_dir / f"{normalized_session_id}.json"
+
+
+def build_session_profile_dir(session_id: str | None, email: str | None = None) -> tuple[str, Path]:
+    """Build a resolved session ID and the matching persistent browser profile directory."""
+
+    normalized_session_id = resolve_session_id(session_id=session_id, email=email)
+    ensure_directory(settings.session_profile_dir)
+    return normalized_session_id, settings.session_profile_dir / normalized_session_id
 
 
 def build_session_metadata_path(session_id: str | None, email: str | None = None) -> Path:
@@ -525,6 +549,143 @@ def _existing_state_is_reusable(state_path: Path) -> bool:
     return True
 
 
+def _saved_state_has_auth_cookie(state_path: Path) -> bool:
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return _has_li_at_cookie(payload)
+
+
+def _context_has_li_at_cookie(context: BrowserContext) -> bool:
+    try:
+        for cookie in context.cookies():
+            if cookie.get("name") == "li_at" and str(cookie.get("value", "")).strip():
+                return True
+    except Exception:
+        logger.debug("Could not inspect browser cookies while checking session", exc_info=True)
+    return False
+
+
+def _verify_saved_session_live_sync(state_path: Path, profile_dir: Path | None = None) -> bool:
+    playwright = None
+    browser = None
+    context = None
+    try:
+        playwright = sync_playwright().start()
+        launch_args = [
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-infobars",
+        ]
+        if settings.use_persistent_profile and profile_dir is not None and profile_dir.exists():
+            context = playwright.chromium.launch_persistent_context(
+                str(profile_dir),
+                headless=True,
+                args=launch_args,
+            )
+        else:
+            browser = playwright.chromium.launch(
+                headless=True,
+                args=launch_args,
+            )
+            context = browser.new_context(storage_state=str(state_path))
+        page = context.new_page()
+        page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=45000)
+        page.wait_for_timeout(2000)
+        return (not _is_authwall_url(page.url)) and _context_has_li_at_cookie(context)
+    except Exception:
+        logger.warning("Live LinkedIn session check failed for %s", state_path, exc_info=True)
+        return False
+    finally:
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                logger.debug("Failed to close context after session check", exc_info=True)
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                logger.debug("Failed to close browser after session check", exc_info=True)
+        if playwright is not None:
+            try:
+                playwright.stop()
+            except Exception:
+                logger.debug("Failed to stop playwright after session check", exc_info=True)
+
+
+def check_saved_session(
+    *,
+    email: str | None = None,
+    session_id: str | None = None,
+    verify_live: bool = False,
+) -> SessionStatusResult:
+    """Check whether a saved LinkedIn session can be used for crawling."""
+
+    normalized_session_id, state_path = build_session_state_path(session_id=session_id, email=email)
+    _, profile_dir = build_session_profile_dir(session_id=normalized_session_id, email=email)
+    exists = state_path.exists()
+    if not exists:
+        return SessionStatusResult(
+            email=email,
+            session_id=normalized_session_id,
+            state_path=state_path,
+            exists=False,
+            has_auth_cookie=False,
+            valid=False,
+            needs_login=True,
+            live_checked=False,
+            message="Chưa có session LinkedIn. Vui lòng đăng nhập ở mục Tài khoản.",
+        )
+
+    has_auth_cookie = _saved_state_has_auth_cookie(state_path)
+    if not has_auth_cookie:
+        return SessionStatusResult(
+            email=email,
+            session_id=normalized_session_id,
+            state_path=state_path,
+            exists=True,
+            has_auth_cookie=False,
+            valid=False,
+            needs_login=True,
+            live_checked=False,
+            message="Session LinkedIn không hợp lệ. Vui lòng đăng nhập lại.",
+        )
+
+    if not verify_live:
+        return SessionStatusResult(
+            email=email,
+            session_id=normalized_session_id,
+            state_path=state_path,
+            exists=True,
+            has_auth_cookie=True,
+            valid=True,
+            needs_login=False,
+            live_checked=False,
+            message="Đã tìm thấy session LinkedIn có cookie đăng nhập.",
+        )
+
+    live = _verify_saved_session_live_sync(state_path, profile_dir)
+    return SessionStatusResult(
+        email=email,
+        session_id=normalized_session_id,
+        state_path=state_path,
+        exists=True,
+        has_auth_cookie=True,
+        valid=live,
+        needs_login=not live,
+        live_checked=True,
+        message=(
+            "Session LinkedIn còn dùng được."
+            if live
+            else "Session LinkedIn đã hết hạn hoặc bị LinkedIn chặn. Vui lòng đăng nhập lại."
+        ),
+    )
+
+
 def _is_checkpoint_challenge_url(current_url: str) -> bool:
     parsed = urlparse((current_url or "").strip())
     path = (parsed.path or "").lower()
@@ -536,10 +697,11 @@ def _close_pending_browser_objects(pending: PendingLoginSession) -> None:
         pending.context.close()
     except Exception:
         logger.debug("Failed to close pending context", exc_info=True)
-    try:
-        pending.browser.close()
-    except Exception:
-        logger.debug("Failed to close pending browser", exc_info=True)
+    if pending.browser is not None:
+        try:
+            pending.browser.close()
+        except Exception:
+            logger.debug("Failed to close pending browser", exc_info=True)
     try:
         pending.playwright.stop()
     except Exception:
@@ -632,32 +794,53 @@ def _login_and_save_session_sync(
         raise ValueError("email and password are required in the request body")
 
     normalized_session_id, state_path = build_session_state_path(session_id=session_id, email=email)
+    _, profile_dir = build_session_profile_dir(session_id=normalized_session_id, email=email)
     ensure_directory(state_path.parent)
 
     if state_path.exists() and not force_relogin:
         if _existing_state_is_reusable(state_path):
-            logger.info("Reusing existing LinkedIn state file at %s", state_path)
-            return LoginFlowResult(
-                status="success",
-                session_id=normalized_session_id,
-                state_path=state_path,
-                email=email.strip().lower(),
-            )
-        logger.info("Existing LinkedIn state file is invalid; continuing with fresh login")
+            if settings.use_persistent_profile and not profile_dir.exists():
+                logger.info(
+                    "Existing LinkedIn state file is reusable but persistent profile is missing; "
+                    "continuing login to create profile at %s",
+                    profile_dir,
+                )
+            else:
+                logger.info("Reusing existing LinkedIn state file at %s", state_path)
+                return LoginFlowResult(
+                    status="success",
+                    session_id=normalized_session_id,
+                    state_path=state_path,
+                    email=email.strip().lower(),
+                )
+        else:
+            logger.info("Existing LinkedIn state file is invalid; continuing with fresh login")
 
     playwright = sync_playwright().start()
-    browser = playwright.chromium.launch(
-            headless=False, # Luôn luôn hiện trình duyệt khi đăng nhập để vượt Captcha dễ dàng
-            channel="chrome", # Dùng Chrome thật để hạn chế bị LinkedIn chặn
-            args=[
-                "--disable-gpu",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-infobars",
-            ],
+    browser = None
+    launch_args = [
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-infobars",
+    ]
+    if settings.use_persistent_profile:
+        ensure_directory(profile_dir)
+        context = playwright.chromium.launch_persistent_context(
+            str(profile_dir),
+            headless=settings.headless,
+            channel="chrome" if not settings.headless else None,
+            args=launch_args,
         )
-    context = browser.new_context()
+    else:
+        browser = playwright.chromium.launch(
+            headless=settings.headless,
+            channel="chrome" if not settings.headless else None,
+            args=launch_args,
+        )
+        context = browser.new_context()
+
     page = context.new_page()
     keep_open_for_verify = False
 
@@ -769,7 +952,8 @@ def _login_and_save_session_sync(
     finally:
         if not keep_open_for_verify:
             context.close()
-            browser.close()
+            if browser is not None:
+                browser.close()
             playwright.stop()
 
 
@@ -891,3 +1075,4 @@ def verify_pending_login_otp(
         checkpoint_url,
     )
     return future.result()
+

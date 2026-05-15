@@ -65,7 +65,7 @@ async def run_scheduled_crawl():
                 "password": "dummy_password_not_used", 
                 "force_relogin": False, 
                 "max_posts": int(os.getenv("DEFAULT_MAX_ITEMS", 50)),
-                "crawler_type": "playwright", 
+                "crawler_type": os.getenv("SCHEDULED_CRAWLER_TYPE", "auto"),
                 "group_urls": list(group_urls) 
             }
 

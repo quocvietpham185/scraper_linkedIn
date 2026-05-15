@@ -15,6 +15,8 @@ import type {
   LoginResponse,
   N8nGroupOperationResponse,
   RemoveN8nGroupRequest,
+  SessionStatusRequest,
+  SessionStatusResponse,
   StartWorkflowRequest,
   StartWorkflowResponse,
   StatusResponse,
@@ -105,6 +107,15 @@ export function verifyLinkedInOtp(
       otp: payload.otp,
       checkpoint_url: payload.checkpointUrl,
     }),
+  })
+}
+
+export function checkLinkedInSession(
+  payload: SessionStatusRequest,
+): Promise<SessionStatusResponse> {
+  return requestJson<SessionStatusResponse>('/session/status', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 

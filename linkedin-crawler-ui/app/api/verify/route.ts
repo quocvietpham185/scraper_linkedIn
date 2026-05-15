@@ -3,7 +3,8 @@
  */
 export const maxDuration = 300;
 
-const BACKEND_URL = "http://127.0.0.1:8111";
+const BACKEND_URL =
+  process.env.LINKEDIN_CRAWLER_INTERNAL_API_URL ?? "http://127.0.0.1:8111";
 
 export async function POST(request: Request) {
   const apiKey =

@@ -1,0 +1,83 @@
+{
+  "title": "LinkedIn Group Crawler Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "groupUrls": {
+      "title": "LinkedIn group URLs",
+      "type": "array",
+      "description": "List of LinkedIn group URLs to crawl.",
+      "editor": "stringList",
+      "prefill": ["https://www.linkedin.com/groups/1234567/"]
+    },
+    "maxItems": {
+      "title": "Max posts per group",
+      "type": "integer",
+      "description": "Maximum number of post items to collect from each group.",
+      "minimum": 1,
+      "maximum": 500,
+      "default": 100
+    },
+    "targetDate": {
+      "title": "Target date",
+      "type": "string",
+      "description": "Optional YYYY-MM-DD date. The Actor still returns all collected posts; backend applies final filtering.",
+      "editor": "textfield"
+    },
+    "scrollTimes": {
+      "title": "Scroll times",
+      "type": "integer",
+      "description": "Maximum number of scroll actions performed on each group page.",
+      "minimum": 1,
+      "maximum": 80,
+      "default": 8
+    },
+    "delayMinMs": {
+      "title": "Minimum delay between scrolls",
+      "type": "integer",
+      "description": "Minimum randomized wait time in milliseconds after each scroll.",
+      "minimum": 0,
+      "maximum": 120000,
+      "default": 1000
+    },
+    "delayMaxMs": {
+      "title": "Maximum delay between scrolls",
+      "type": "integer",
+      "description": "Maximum randomized wait time in milliseconds after each scroll.",
+      "minimum": 0,
+      "maximum": 120000,
+      "default": 2500
+    },
+    "maxConcurrency": {
+      "title": "Max concurrency",
+      "type": "integer",
+      "description": "Maximum number of group pages crawled in parallel. Keep this low to reduce blocking.",
+      "minimum": 1,
+      "maximum": 3,
+      "default": 1
+    },
+    "sessionCookie": {
+      "title": "LinkedIn li_at cookie",
+      "type": "string",
+      "description": "Optional LinkedIn li_at cookie value.",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "storageStateJson": {
+      "title": "Playwright storage state JSON",
+      "type": "string",
+      "description": "Optional Playwright storage state as a JSON string with cookies/localStorage.",
+      "editor": "textarea"
+    },
+    "proxyConfiguration": {
+      "title": "Proxy configuration",
+      "type": "object",
+      "description": "Apify proxy configuration.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true
+      }
+    }
+  },
+  "required": ["groupUrls"]
+}

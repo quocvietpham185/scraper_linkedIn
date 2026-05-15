@@ -2,6 +2,7 @@ from __future__ import annotations
 """Background worker to verify LinkedIn comments."""
 
 import asyncio
+import json
 from typing import Optional
 
 from playwright.sync_api import Error, sync_playwright
@@ -17,7 +18,7 @@ verify_queue: asyncio.Queue = asyncio.Queue()
 
 async def _to_thread_helper(func, *args, **kwargs):
     import functools
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
 
 async def background_verification_worker():

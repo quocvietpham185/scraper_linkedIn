@@ -24,21 +24,12 @@ export function DashboardAuthGate({
   children,
 }: DashboardAuthGateProps) {
   // Kiểm tra cookie đồng bộ ngay khi khởi tạo để tránh flash màn hình login khi reload
-  const [isReady, setIsReady] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false
-    const stored = readLinkedInCredentials()
-    return Boolean(stored?.email && stored?.password)
-  })
+  const [hasMounted, setHasMounted] = useState(false)
+  const [isReady, setIsReady] = useState(false)
 
   // Đồng bộ localEmail/localPassword với giá trị khôi phục từ cookie (qua useDashboardCrawler)
-  const [localEmail, setLocalEmail] = useState<string>(() => {
-    if (typeof window === 'undefined') return ''
-    return readLinkedInCredentials()?.email ?? ''
-  })
-  const [localPassword, setLocalPassword] = useState<string>(() => {
-    if (typeof window === 'undefined') return ''
-    return readLinkedInCredentials()?.password ?? ''
-  })
+  const [localEmail, setLocalEmail] = useState('')
+  const [localPassword, setLocalPassword] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const hasCredentials = useMemo(
@@ -47,6 +38,18 @@ export function DashboardAuthGate({
   )
 
   // Đồng bộ isReady khi props email/password thay đổi (ví dụ: sau khi applyAccountCredentials)
+  useEffect(() => {
+    setHasMounted(true)
+    const stored = readLinkedInCredentials()
+    if (!stored?.email || !stored?.password) return
+
+    setLocalEmail(stored.email)
+    setLocalPassword(stored.password)
+    setEmail(stored.email)
+    setPassword(stored.password)
+    setIsReady(true)
+  }, [setEmail, setPassword])
+
   useEffect(() => {
     if (hasCredentials) {
       setIsReady(true)
@@ -69,7 +72,7 @@ export function DashboardAuthGate({
     setIsReady(true)
   }
 
-  if (isReady) {
+  if (hasMounted && isReady) {
     return <>{children}</>
   }
 

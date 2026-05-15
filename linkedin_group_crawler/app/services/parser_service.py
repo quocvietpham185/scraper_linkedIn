@@ -29,6 +29,10 @@ TIME_SELECTORS = [
     ".feed-shared-actor__sub-description",
     'span[aria-label*="ago"]',
 ]
+RELATIVE_TIME_PATTERN = re.compile(
+    r"\b(?:just\s+now|now|\d+\s*(?:mo|mos|month|months|yr|yrs|year|years|w|wk|wks|week|weeks|d|day|days|h|hr|hrs|hour|hours|m|min|mins|minute|minutes))\b",
+    re.IGNORECASE,
+)
 REACTION_SELECTORS = [
     ".social-details-social-counts__reactions-count",
     'button[aria-label*="reaction"]',
@@ -73,6 +77,52 @@ def _safe_attribute(locator: Locator, selectors: list[str], attribute: str) -> s
         except Error:
             logger.debug("Could not extract attribute %s with selector %s", attribute, selector, exc_info=True)
     return ""
+
+
+def _extract_relative_time_from_text(text: str) -> str:
+    """Pick the actual LinkedIn post age from noisy actor subtitle text."""
+
+    cleaned = " ".join((text or "").replace("·", "•").split())
+    if not cleaned:
+        return ""
+
+    segments = [segment.strip() for segment in re.split(r"[•\n\r]+", cleaned) if segment.strip()]
+    candidates: list[str] = []
+    for segment in segments:
+        normalized_segment = segment.lower().replace("edited", "").strip()
+        match = RELATIVE_TIME_PATTERN.search(normalized_segment)
+        if match:
+            candidates.append(match.group(0))
+
+    if candidates:
+        return min(candidates, key=len).strip()
+
+    matches = [match.group(0).strip() for match in RELATIVE_TIME_PATTERN.finditer(cleaned)]
+    return matches[-1] if matches else ""
+
+
+def _extract_posted_at_raw(post_locator: Locator) -> str:
+    """Extract only the relative time token, avoiding profile text such as '24 Hours'."""
+
+    for selector in TIME_SELECTORS:
+        try:
+            elements = post_locator.locator(selector)
+            count = min(elements.count(), 8)
+            for index in range(count):
+                element = elements.nth(index)
+                text = element.inner_text(timeout=2000).strip()
+                relative_time = _extract_relative_time_from_text(text)
+                if relative_time:
+                    return relative_time
+        except Error:
+            logger.debug("Could not extract posted time with selector %s", selector, exc_info=True)
+
+    try:
+        text = post_locator.inner_text(timeout=3000).strip()
+        return _extract_relative_time_from_text(text)
+    except Error:
+        logger.debug("Could not extract posted time from full post text", exc_info=True)
+        return ""
 
 
 def _normalize_linkedin_url(url: str) -> str:
@@ -194,7 +244,7 @@ def parse_post_locator(post_locator: Locator) -> dict[str, Any] | None:
     try:
         author = _safe_text(post_locator, AUTHOR_SELECTORS, default="Unknown author")
         content = _safe_text(post_locator, CONTENT_SELECTORS, default="")
-        posted_at_raw = _safe_text(post_locator, TIME_SELECTORS, default="")
+        posted_at_raw = _extract_posted_at_raw(post_locator)
         post_url = _extract_post_url(post_locator)
 
         likes_text = _safe_text(post_locator, REACTION_SELECTORS, default="")

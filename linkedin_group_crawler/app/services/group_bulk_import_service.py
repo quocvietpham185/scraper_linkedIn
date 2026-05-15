@@ -56,6 +56,22 @@ def normalize_group_url(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
+def _is_login_or_checkpoint_url(url: str) -> bool:
+    parsed = urlparse((url or "").strip())
+    path = (parsed.path or "").lower()
+    return any(path.startswith(prefix) for prefix in ("/login", "/checkpoint", "/authwall"))
+
+
+def _is_expected_group_url(expected_url: str, actual_url: str) -> bool:
+    expected = urlparse((expected_url or "").strip())
+    actual = urlparse((actual_url or "").strip())
+    expected_path = (expected.path or "").rstrip("/").lower()
+    actual_path = (actual.path or "").rstrip("/").lower()
+    return bool(expected_path) and actual.netloc.endswith("linkedin.com") and (
+        actual_path == expected_path or actual_path.startswith(f"{expected_path}/")
+    )
+
+
 def extract_member_count_from_html(html: str) -> int | None:
     for pat in _MEMBER_COUNT_PATTERNS:
         m = pat.search(html or "")
@@ -81,6 +97,7 @@ def extract_member_count_from_html(html: str) -> int | None:
 
 
 def _extract_group_name_from_page(page: Page) -> str:
+    invalid_titles = {"welcome back", "sign in", "login", "linkedin login", "linkedin"}
     selectors = [
         "h1.groups-entity__name",
         "h1.groups-entity__name span",
@@ -93,8 +110,10 @@ def _extract_group_name_from_page(page: Page) -> str:
             if loc.count() == 0:
                 continue
             text = loc.inner_text(timeout=5000).strip()
-            if text and "sign in" not in text.lower():
-                return " ".join(text.split())
+            normalized = " ".join(text.split())
+            lowered = normalized.lower()
+            if normalized and "sign in" not in lowered and lowered not in invalid_titles:
+                return normalized
         except Error:
             logger.debug("Không đọc được tên nhóm với selector %s", sel, exc_info=True)
     return ""
@@ -114,9 +133,16 @@ def scrape_group_metadata(page: Page, group_url: str) -> tuple[str, int | None]:
         page.wait_for_load_state("load", timeout=5000)
     except Error:
         pass
+    if _is_login_or_checkpoint_url(page.url) or not _is_expected_group_url(group_url, page.url):
+        raise RuntimeError(
+            "Session LinkedIn không hợp lệ hoặc bị chuyển khỏi trang nhóm. "
+            f"URL cuối: {page.url}. Cần đăng nhập lại trước khi cào metadata nhóm."
+        )
     html = page.content()
     member = extract_member_count_from_html(html)
     name = _extract_group_name_from_page(page)
+    if name.lower() == "welcome back":
+        raise RuntimeError("LinkedIn trả về trang đăng nhập 'Welcome Back'. Cần đăng nhập lại.")
     return name, member
 
 
@@ -226,4 +252,3 @@ def bulk_scrape_groups(
     if exc_holder:
         raise exc_holder[0]
     return result_holder[0] if result_holder else []
-

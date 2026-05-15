@@ -3,6 +3,7 @@ uvicorn
 playwright
 python-dotenv
 pydantic
+eval_type_backport
 httpx
 pytest
 google-api-python-client

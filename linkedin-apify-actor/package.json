@@ -1,0 +1,16 @@
+{
+  "name": "linkedin-group-crawler-actor",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/main.js",
+    "lint": "node --check src/main.js && node --check src/linkedinParser.js && node --check src/normalizePost.js"
+  },
+  "dependencies": {
+    "apify": "^3.4.2",
+    "crawlee": "^3.15.1",
+    "playwright": "^1.56.1"
+  },
+  "devDependencies": {}
+}

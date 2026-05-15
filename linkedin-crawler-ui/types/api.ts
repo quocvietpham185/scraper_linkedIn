@@ -28,6 +28,25 @@ export interface VerifyLoginRequest {
 
 export type VerifyLoginResponse = LoginResponse;
 
+export interface SessionStatusRequest {
+  email?: string;
+  session_id?: string;
+  verify_live?: boolean;
+}
+
+export interface SessionStatusData {
+  email: string | null;
+  session_id: string;
+  state_path: string;
+  exists: boolean;
+  has_auth_cookie: boolean;
+  valid: boolean;
+  needs_login: boolean;
+  live_checked: boolean;
+}
+
+export type SessionStatusResponse = ApiResponse<SessionStatusData | null>;
+
 export interface StartWorkflowRequest {
   email: string;
   password: string;
@@ -37,7 +56,7 @@ export interface StartWorkflowRequest {
   mode?: "Detailed" | "Fast";
   delay_sec?: number;
   group_urls?: string[];
-  crawler_type?: "playwright" | "apify";
+  crawler_type?: "auto" | "playwright" | "apify";
 }
 
 export interface StartWorkflowResponseData {

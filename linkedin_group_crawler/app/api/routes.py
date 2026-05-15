@@ -75,15 +75,21 @@ from app.services import google_sheet_service as gsheet
 from app.services import group_status_service
 from app.services import live_feed_service
 from app.services.background_crawler_service import run_background_crawl
+from app.services.crawl_orchestrator_service import crawl_group_with_tiers
 from app.services.auth_service import (
     PendingLoginSessionNotFoundError,
+    check_saved_session,
     login_and_save_session,
     verify_pending_login_otp,
 )
 from app.services.crawler_service import open_group_and_collect_posts
 from app.services.apify_crawler_service import run_apify_crawler_for_group
 from app.services.group_bulk_import_service import bulk_scrape_groups
-from app.services.telegram_service import send_telegram_message
+from app.services.telegram_service import (
+    format_crawl_group_no_match_message,
+    format_crawl_group_success_message,
+    send_telegram_message,
+)
 from app.services import google_sheet_service as gsheet
 from app.services.post_filter_service import (
     build_crawl_sessions_from_posts,
@@ -101,6 +107,12 @@ from app.utils.logger import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+class SessionStatusRequest(BaseModel):
+    email: str | None = None
+    session_id: str | None = None
+    verify_live: bool = False
 
 
 def _state_path_for_response(state_path) -> str:
@@ -148,7 +160,7 @@ def _crawl_id_session_prefix(email: str | None, session_id: str | None, resolved
         slug = re.sub(r"[^a-z0-9]+", "_", raw_email).strip("_")
         return slug
     
-    # Fallback cho session_id cũ
+    # Fallback cho session_id cÅ©
     fallback = (raw_email or (session_id or "").strip().lower() or (resolved_linkedin_session_id or "").strip().lower())
     if fallback:
         # Cho phép dấu chấm (.) trong slug để khớp với file storage
@@ -340,6 +352,40 @@ def verify_login(payload: VerifyLoginRequest) -> VerifyLoginResponse:
         )
 
 
+@router.post("/session/status", dependencies=[Depends(verify_api_key)])
+def linkedin_session_status(payload: SessionStatusRequest) -> dict[str, Any]:
+    """Check whether a saved LinkedIn session exists and is usable."""
+
+    email = (payload.email or "").strip()
+    session_id = (payload.session_id or "").strip()
+    if not email and not session_id:
+        return {
+            "success": False,
+            "message": "Vui lòng truyền email hoặc session_id để kiểm tra session.",
+            "data": None,
+        }
+
+    status_result = check_saved_session(
+        email=email or None,
+        session_id=session_id or None,
+        verify_live=payload.verify_live,
+    )
+    return {
+        "success": True,
+        "message": status_result.message,
+        "data": {
+            "email": status_result.email,
+            "session_id": status_result.session_id,
+            "state_path": _state_path_for_response(status_result.state_path),
+            "exists": status_result.exists,
+            "has_auth_cookie": status_result.has_auth_cookie,
+            "valid": status_result.valid,
+            "needs_login": status_result.needs_login,
+            "live_checked": status_result.live_checked,
+        },
+    }
+
+
 @router.post("/crawl-linkedin-group", response_model=CrawlResponse, dependencies=[Depends(verify_api_key)])
 def crawl_linkedin_group(payload: CrawlGroupRequest) -> CrawlResponse:
     """Crawl một nhóm: trả **toàn bộ** bài đúng ngày mục tiêu; không có thì **N** bài gần nhất (cho n8n).
@@ -399,19 +445,66 @@ def crawl_linkedin_group(payload: CrawlGroupRequest) -> CrawlResponse:
             )
             try:
                 apify_result = asyncio.get_event_loop().run_until_complete(
-                    run_apify_crawler_for_group(payload.group_url)
+                    run_apify_crawler_for_group(
+                        payload.group_url,
+                        email=payload.email,
+                        session_id=payload.session_id,
+                        max_items=payload.max_items,
+                        target_date=payload.target_date,
+                    )
                 )
             except RuntimeError:
                 # FastAPI sync endpoint: tạo event loop mới nếu cần
                 loop = asyncio.new_event_loop()
                 try:
                     apify_result = loop.run_until_complete(
-                        run_apify_crawler_for_group(payload.group_url)
+                        run_apify_crawler_for_group(
+                            payload.group_url,
+                            email=payload.email,
+                            session_id=payload.session_id,
+                            max_items=payload.max_items,
+                            target_date=payload.target_date,
+                        )
                     )
                 finally:
                     loop.close()
 
-            likes = int(apify_result.get("likes", 0) or 0)
+            if not apify_result.get("success"):
+                return CrawlResponse(
+                    success=False,
+                    message=str(apify_result.get("error") or "Apify fallback failed"),
+                    data=None,
+                )
+
+            raw_posts = apify_result.get("posts") or []
+            filtered_posts, target_day = enrich_and_filter_posts(
+                posts=list(raw_posts),
+                target_date=payload.target_date,
+                crawl_time=datetime.now(),
+            )
+            posts_out = filtered_posts or select_most_recent_posts(
+                list(raw_posts),
+                limit=payload.fallback_recent_count,
+            )
+            top_post = pick_top_post(posts_out) if posts_out else None
+            if posts_out and top_post:
+                return CrawlResponse(
+                    success=True,
+                    message=f"Apify fallback OK sau khi Playwright loi - {len(posts_out)} bai | {payload.group_url}",
+                    data=CrawlDataResponse(
+                        session_id=payload.session_id or "apify_fallback",
+                        group_url=payload.group_url,
+                        group_name=apify_result.get("group_name", ""),
+                        target_date=target_day.isoformat(),
+                        email=payload.email,
+                        total_posts_scraped=len(raw_posts),
+                        total_posts_in_target_date=len(filtered_posts),
+                        top_post=TopPostResponse.from_post_dict(top_post),
+                        posts=[TopPostResponse.from_post_dict(p) for p in posts_out],
+                        selection_mode="apify_fallback",
+                    ),
+                )
+            likes = 0
             if likes > 0:
                 top_post_data = {
                     "content": apify_result.get("content", ""),
@@ -539,7 +632,7 @@ async def apify_crawl_group(
         if not email:
             email = "unknown"
 
-        apify_res = await run_apify_crawler_for_group(group_url)
+        apify_res = await run_apify_crawler_for_group(group_url, email=email)
         if not apify_res.get("success"):
              return CrawlResponse(success=False, message=apify_res.get("error", "Apify failed"), data=None)
         
@@ -567,18 +660,18 @@ async def apify_crawl_group(
             except Exception as sheet_exc:
                 logger.warning(f"Manual Apify: Lỗi cập nhật sheet: {sheet_exc}")
 
-            # 2. Construct and Send Telegram Message
             group_name = apify_res.get("group_name", "Unknown Group")
-            msg = (
-                f"✅ <b>Thông báo kết quả cào LinkedIn (Manual)</b>\n\n"
-                f"👥 <b>Nhóm:</b> {group_name}\n"
-                f"🔗 <b>Link Group:</b> {group_url}\n\n"
-                f"📝 <b>Top Post:</b>\n"
-                f"🔗 <a href='{top_post.get('post_url')}'>Link to post</a>\n"
-                f"📄 <b>Nội dung:</b> {str(top_post.get('content'))[:200]}...\n"
-                f"👍 <b>Likes:</b> {top_post.get('likes')}\n"
-                f"💬 <b>Comments:</b> {top_post.get('comments')}\n"
-                f"📊 <b>Score:</b> {top_post.get('score')}"
+            msg = format_crawl_group_success_message(
+                index=1,
+                total=1,
+                email=email,
+                group_name=group_name,
+                group_url=group_url,
+                target_date=target_date,
+                source="apify_direct",
+                total_posts=len(raw_posts),
+                member_count=int(apify_res.get("member_count", 0) or 0),
+                top_post=top_post,
             )
             send_telegram_message(msg)
 
@@ -614,12 +707,15 @@ async def apify_crawl_group(
         group_name = apify_res.get("group_name", "Unknown Group")
         msg_info = f"✅ Hoàn thành: Đã cào nhóm '{group_name}' nhưng không có bài viết nào phù hợp trong ngày {target_date}."
         
-        # Gửi Telegram báo cáo kể cả khi không có bài
-        tele_msg = (
-            f"⚠️ <b>Thông báo kết quả cào LinkedIn (Manual)</b>\n\n"
-            f"👥 <b>Nhóm:</b> {group_name}\n"
-            f"🔗 <b>Link Group:</b> {group_url}\n\n"
-            f"ℹ️ <i>Không tìm thấy bài viết nào phù hợp trong ngày {target_date}.</i>"
+        tele_msg = format_crawl_group_no_match_message(
+            index=1,
+            total=1,
+            email=email,
+            group_name=group_name,
+            group_url=group_url,
+            target_date=target_date,
+            source="apify_direct",
+            total_posts=len(raw_posts),
         )
         send_telegram_message(tele_msg)
 
@@ -841,7 +937,7 @@ class SeedingStatusUpdate(BaseModel):
     email: str
     status: str
 
-@router.get("/seeding/list")
+@router.get("/seeding/list", dependencies=[Depends(verify_api_key)])
 def list_seeding_tasks(email: str = Query(...)):
     """Danh sách nhiệm vụ seeding của nhân viên."""
     try:
@@ -850,7 +946,7 @@ def list_seeding_tasks(email: str = Query(...)):
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-@router.post("/seeding/update-status")
+@router.post("/seeding/update-status", dependencies=[Depends(verify_api_key)])
 def update_seeding_status(payload: SeedingStatusUpdate):
     """Cập nhật trạng thái nhiệm vụ seeding thủ công."""
     try:
@@ -863,8 +959,8 @@ def update_seeding_status(payload: SeedingStatusUpdate):
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-@router.post("/seeding/report")
-def report_seeding_comment(payload: dict):
+@router.post("/seeding/report", dependencies=[Depends(verify_api_key)])
+def report_seeding_comment(payload: dict, background_tasks: BackgroundTasks):
     """Báo cáo đã comment cho một nhiệm vụ."""
     try:
         task_id = payload.get("task_id")
@@ -874,11 +970,12 @@ def report_seeding_comment(payload: dict):
             return {"success": False, "message": "task_id and email are required"}
         
         task = seeding_task_service.report_employee_comment(task_id, email, comment_url)
+        background_tasks.add_task(seeding_task_service.verify_employee_comment, task_id, email)
         return {"success": True, "data": task}
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-@router.post("/seeding/verify")
+@router.post("/seeding/verify", dependencies=[Depends(verify_api_key)])
 def verify_seeding_comment(payload: dict):
     """Yêu cầu hệ thống xác minh comment tự động."""
     try:
@@ -893,7 +990,7 @@ def verify_seeding_comment(payload: dict):
         return {"success": False, "message": str(e)}
 
 
-@router.post("/seeding/lock-comments")
+@router.post("/seeding/lock-comments", dependencies=[Depends(verify_api_key)])
 def lock_seeding_comments(payload: dict):
     """Đánh dấu bài viết đã khóa comment."""
     try:
@@ -912,19 +1009,38 @@ def lock_seeding_comments(payload: dict):
 def start_crawl_workflow(payload: StartWorkflowRequest, background_tasks: BackgroundTasks) -> StartCrawlResponse:
     """Khởi động luồng cào dữ liệu qua BackgroundTasks thay vì n8n."""
     try:
-        id_prefix = _crawl_id_session_prefix(payload.email, None, "")
-        
-        # Kiểm tra xem đã có file session cho email này chưa
-        from app.config import settings
-        session_file = settings.session_storage_dir / f"{id_prefix}.json"
-        if not session_file.exists():
+        session_status = check_saved_session(email=payload.email, verify_live=False)
+        id_prefix = session_status.session_id or _crawl_id_session_prefix(payload.email, None, "")
+        crawler_type = getattr(payload, "crawler_type", "auto")
+        can_run_cloud_fallback = (
+            crawler_type in ("auto", "apify")
+            and (
+                (settings.apify_own_actor_enabled and bool((settings.apify_actor_id or "").strip()))
+                or (
+                    settings.apify_3rd_party_fallback_enabled
+                    and bool((settings.apify_3rd_party_actor_id or "").strip())
+                )
+            )
+        )
+        if not session_status.valid and crawler_type == "playwright":
              return StartCrawlResponse(
                 success=False, 
-                message=f"Chưa tìm thấy phiên đăng nhập cho {payload.email}. Vui lòng thực hiện Đăng nhập (Login) trước khi cào.", 
+                message=session_status.message,
                 data=None
             )
             
-        id_session_crawl = f"{id_prefix}_{random.randint(1_000_000_000, 9_999_999_999_999)}"
+        if not session_status.valid and not can_run_cloud_fallback:
+             return StartCrawlResponse(
+                success=False,
+                message=(
+                    f"{session_status.message} Nếu muốn chạy không cần session Playwright, "
+                    "hãy cấu hình APIFY_TOKEN/APIFY_ACTOR_ID hoặc chọn crawler Apify."
+                ),
+                data=None
+            )
+
+        crawl_started_token = datetime.now().strftime("%Y%m%d%H%M%S")
+        id_session_crawl = f"{id_prefix}_{crawl_started_token}_{random.randint(1000, 9999)}"
         
         # Tạo task tracking 
         group_count = len(payload.group_urls) if payload.group_urls else 0

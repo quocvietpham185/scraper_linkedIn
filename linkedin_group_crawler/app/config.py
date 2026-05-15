@@ -105,6 +105,15 @@ def _apify_actor_id_from_env() -> str:
 
     return (
         os.getenv("APIFY_ACTOR_ID")
+        or "yourUsername~linkedin-group-crawler"
+    ).strip()
+
+
+def _apify_3rd_party_actor_id_from_env() -> str:
+    """Emergency fallback Actor ID from a third-party provider."""
+
+    return (
+        os.getenv("APIFY_3RD_PARTY_ACTOR_ID")
         or "scraping_solutions~linkedin-posts-scraper-users-groups-schools-no-cookies"
     ).strip()
 
@@ -154,6 +163,8 @@ class Settings:
     headless: bool = _parse_bool(os.getenv("HEADLESS"), default=True)
     state_path: Path = BASE_DIR / os.getenv("STATE_PATH", "storage/linkedin_state.json")
     session_storage_dir: Path = BASE_DIR / "storage" / "session"
+    session_profile_dir: Path = BASE_DIR / os.getenv("SESSION_PROFILE_DIR", "storage/session_profile")
+    use_persistent_profile: bool = _parse_bool(os.getenv("USE_PERSISTENT_PROFILE"), default=True)
     default_scroll_times: int = int(os.getenv("DEFAULT_SCROLL_TIMES", "8"))
     default_scroll_delay_ms: int = int(os.getenv("DEFAULT_SCROLL_DELAY_MS", "2000"))
     default_scroll_delay_min_ms: int = int(os.getenv("DEFAULT_SCROLL_DELAY_MIN_MS", "1000"))
@@ -207,15 +218,35 @@ class Settings:
     google_sheet_group_urls_tab: str = field(
         default_factory=_google_sheet_group_urls_tab_from_env,
     )
-    crawl_batch_group_delay_min_sec: float = float(os.getenv("CRAWL_BATCH_GROUP_DELAY_MIN_SEC", "3"))
-    crawl_batch_group_delay_max_sec: float = float(os.getenv("CRAWL_BATCH_GROUP_DELAY_MAX_SEC", "12"))
+    crawl_batch_group_delay_min_sec: float = float(os.getenv("CRAWL_BATCH_GROUP_DELAY_MIN_SEC", "30"))
+    crawl_batch_group_delay_max_sec: float = float(os.getenv("CRAWL_BATCH_GROUP_DELAY_MAX_SEC", "90"))
+    scheduled_crawl_enabled: bool = _parse_bool(os.getenv("SCHEDULED_CRAWL_ENABLED"), default=False)
+    scheduled_crawl_time: str = (os.getenv("SCHEDULED_CRAWL_TIME") or "08:00").strip()
+    scheduled_crawler_type: str = (os.getenv("SCHEDULED_CRAWLER_TYPE") or "auto").strip()
+    scheduled_account_delay_sec: float = float(os.getenv("SCHEDULED_ACCOUNT_DELAY_SEC", "300"))
+    scheduled_run_on_startup: bool = _parse_bool(os.getenv("SCHEDULED_RUN_ON_STARTUP"), default=False)
 
     # ── Apify fallback crawler ─────────────────────────────────
     # Token lấy từ https://console.apify.com/account/integrations
     apify_token: str = os.getenv("APIFY_TOKEN", "")
+    apify_own_token: str = os.getenv("APIFY_OWN_TOKEN", "")
+    apify_3rd_party_token: str = os.getenv("APIFY_3RD_PARTY_TOKEN", "")
     apify_actor_id: str = field(default_factory=_apify_actor_id_from_env)
+    apify_3rd_party_actor_id: str = field(default_factory=_apify_3rd_party_actor_id_from_env)
     # true = Playwright lỗi → tự động thử lại bằng Apify API
     apify_fallback_enabled: bool = _parse_bool(os.getenv("APIFY_FALLBACK_ENABLED"), default=False)
+    apify_own_actor_enabled: bool = _parse_bool(os.getenv("APIFY_OWN_ACTOR_ENABLED"), default=True)
+    apify_3rd_party_fallback_enabled: bool = _parse_bool(os.getenv("APIFY_3RD_PARTY_FALLBACK_ENABLED"), default=False)
+    apify_default_max_items: int = int(os.getenv("APIFY_DEFAULT_MAX_ITEMS", "20"))
+    apify_default_scroll_times: int = int(os.getenv("APIFY_DEFAULT_SCROLL_TIMES", "3"))
+    apify_delay_min_ms: int = int(os.getenv("APIFY_DELAY_MIN_MS", "5000"))
+    apify_delay_max_ms: int = int(os.getenv("APIFY_DELAY_MAX_MS", "12000"))
+    apify_group_delay_min_sec: float = float(os.getenv("APIFY_GROUP_DELAY_MIN_SEC", "300"))
+    apify_group_delay_max_sec: float = float(os.getenv("APIFY_GROUP_DELAY_MAX_SEC", "600"))
+    apify_proxy_groups: list[str] = field(
+        default_factory=lambda: _parse_csv(os.getenv("APIFY_PROXY_GROUPS"), default=("RESIDENTIAL",)),
+    )
+    apify_proxy_country_code: str = (os.getenv("APIFY_PROXY_COUNTRY_CODE") or "VN").strip()
     telegram_bot_token: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str | None = os.getenv("TELEGRAM_CHAT_ID", "7254374226")
     telegram_thread_id: str | None = os.getenv("TELEGRAM_THREAD_ID")

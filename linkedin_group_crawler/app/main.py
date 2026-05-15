@@ -24,6 +24,7 @@ import asyncio
 import sys
 from app.services.comment_verifier import background_verification_worker
 from app.services.group_status_service import background_group_status_worker
+from app.services.scheduled_crawl_service import start_scheduled_crawl_worker
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -38,6 +39,8 @@ app = FastAPI(
 async def startup_event():
     asyncio.create_task(background_verification_worker())
     asyncio.create_task(background_group_status_worker())
+    if settings.scheduled_crawl_enabled:
+        start_scheduled_crawl_worker()
 
 app.add_middleware(
     CORSMiddleware,

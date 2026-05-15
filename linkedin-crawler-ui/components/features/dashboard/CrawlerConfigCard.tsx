@@ -133,6 +133,27 @@ export function CrawlerConfigCard() {
               disabled={d.isCrawling}
             />
           </div>
+          <div className="flex flex-col gap-base">
+            <label
+              htmlFor={`${d.modeId}-crawler-type`}
+              className="text-label-md text-on-surface-variant font-semibold tracking-wide uppercase"
+            >
+              Luồng crawl
+            </label>
+            <select
+              id={`${d.modeId}-crawler-type`}
+              className="border-outline-variant bg-surface focus:border-primary focus:ring-primary rounded-lg border px-md py-sm transition-all outline-none focus:ring-1"
+              value={d.crawlerType}
+              onChange={(e) =>
+                d.setCrawlerType(e.target.value as "auto" | "playwright" | "apify")
+              }
+              disabled={d.isCrawling}
+            >
+              <option value="auto">Auto: Local → Actor → dự phòng</option>
+              <option value="playwright">Chỉ Playwright local</option>
+              <option value="apify">Chỉ Apify Actor</option>
+            </select>
+          </div>
           <div className="grid grid-cols-2 gap-md">
             <div className="flex flex-col gap-base">
               <label

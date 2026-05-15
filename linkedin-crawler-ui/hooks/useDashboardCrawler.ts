@@ -8,6 +8,7 @@ import type {
 } from "@/components/features/dashboard/types";
 import { DASHBOARD_PAGE_SIZE } from "@/components/features/dashboard/constants";
 import {
+  checkLinkedInSession,
   crawlLinkedInGroup,
   fetchCrawlerStatus,
   filterLinkedInPosts,
@@ -128,8 +129,8 @@ export interface DashboardCrawlerValue {
   paginatedGroupRows: { globalIndex: number; url: string }[];
   handleGroupsGoPrevPage: () => void;
   handleGroupsGoNextPage: () => void;
-  crawlerType: "playwright" | "apify";
-  setCrawlerType: (v: "playwright" | "apify") => void;
+  crawlerType: "auto" | "playwright" | "apify";
+  setCrawlerType: (v: "auto" | "playwright" | "apify") => void;
   handleStartCrawlWithParams: (params: StartWorkflowRequest) => Promise<void>;
   status: StatusDataResponse | null;
 }
@@ -176,7 +177,7 @@ export function useDashboardCrawler(): DashboardCrawlerValue {
   const [crawlSuccessModalMessage, setCrawlSuccessModalMessage] = useState<
     string | null
   >(null);
-  const [crawlerType, setCrawlerType] = useState<"playwright" | "apify">("playwright");
+  const [crawlerType, setCrawlerType] = useState<"auto" | "playwright" | "apify">("auto");
   const [pollingSessionId, setPollingSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusDataResponse | null>(null);
 
@@ -368,6 +369,41 @@ export function useDashboardCrawler(): DashboardCrawlerValue {
     setFeedbackMessage(null);
     setErrorMessage(null);
     try {
+      const wantsLocalSession = params.crawler_type !== "apify";
+      if (wantsLocalSession && params.email.trim()) {
+        setFeedbackMessage("Đang kiểm tra session LinkedIn trước khi crawl...");
+        const sessionResponse = await checkLinkedInSession({
+          email: params.email.trim(),
+          verify_live: false,
+        });
+        const hasUsableSession =
+          sessionResponse.success && sessionResponse.data?.valid === true;
+
+        if (!hasUsableSession) {
+          if (params.password.trim() && params.password !== "skip") {
+            setFeedbackMessage("Session chưa sẵn sàng. Đang đăng nhập lại để làm mới session...");
+            const loginResponse = await loginLinkedIn({
+              email: params.email.trim(),
+              password: params.password,
+              forceRelogin: true,
+            });
+            if (loginResponse.need_otp || loginResponse.login_step === "need_otp") {
+              throw new Error(
+                "LinkedIn đang yêu cầu OTP. Mở mục Tài khoản ở sidebar để nhập OTP rồi chạy crawl lại.",
+              );
+            }
+            if (!loginResponse.success) {
+              throw new Error(loginResponse.message || "Không thể làm mới session LinkedIn trước khi crawl.");
+            }
+          } else {
+            throw new Error(
+              sessionResponse.message ||
+                "Session LinkedIn chưa có hoặc đã hết hạn. Mở mục Tài khoản để đăng nhập lại.",
+            );
+          }
+        }
+      }
+
       const response = await startN8nWorkflow(params);
       if (!response.success) {
         throw new Error(response.message || "Không thể gọi API /start.");
@@ -404,8 +440,8 @@ export function useDashboardCrawler(): DashboardCrawlerValue {
     setFeedbackMessage(null);
     setErrorMessage(null);
 
-    if (!email.trim() || (!password.trim() && crawlerType !== "apify")) {
-      setErrorMessage("Vui lòng nhập email và mật khẩu LinkedIn.");
+    if (!email.trim()) {
+      setErrorMessage("Vui lòng nhập email LinkedIn.");
       return;
     }
     if (lines.length === 0) {
@@ -424,7 +460,7 @@ export function useDashboardCrawler(): DashboardCrawlerValue {
     await handleStartCrawlWithParams({
       email: email.trim(),
       password: password || "skip",
-      force_relogin: true,
+      force_relogin: false,
       max_posts: Math.max(1, Math.min(maxPosts, 500)),
       target_date: targetDate || undefined,
       mode,

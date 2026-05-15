@@ -245,6 +245,13 @@ def _session_sort_latest_post_date(posts: list[dict[str, Any]]) -> date:
     return max(ok) if ok else date.min
 
 
+def _session_timestamp_token(session_id: str) -> str:
+    """Extract YYYYMMDDHHMMSS from newer crawl session ids for stable latest-first sorting."""
+
+    match = re.search(r"(20\d{12})", str(session_id or ""))
+    return match.group(1) if match else ""
+
+
 def _int_field(post: dict[str, Any], keys: tuple[str, ...]) -> int:
     for k in keys:
         if k not in post:
@@ -329,7 +336,11 @@ def build_crawl_sessions_from_posts(posts: list[dict[str, Any]]) -> list[dict[st
         )
 
     sessions.sort(
-        key=lambda s: (_session_sort_latest_post_date(s["posts"]), s["id_session_crawl"]),
+        key=lambda s: (
+            _session_sort_latest_post_date(s["posts"]),
+            _session_timestamp_token(s["id_session_crawl"]),
+            s["id_session_crawl"],
+        ),
         reverse=True,
     )
     return sessions

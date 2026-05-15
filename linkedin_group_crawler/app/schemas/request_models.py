@@ -299,8 +299,8 @@ class StartWorkflowRequest(BaseModel):
         default=None,
         validation_alias=AliasChoices("target_date", "targetDate", "date"),
     )
-    crawler_type: Literal["playwright", "apify"] = Field(
-        default="playwright",
+    crawler_type: Literal["auto", "playwright", "apify"] = Field(
+        default="auto",
         validation_alias=AliasChoices("crawler_type", "crawlerType"),
     )
     mode: Optional[Literal["Detailed", "Fast"]] = Field(
@@ -564,8 +564,8 @@ class LinkedinAppCrawlBatchRequest(BaseModel):
         description='Ngày mục tiêu YYYY-MM-DD (mặc định: ngày crawl). Khớp "cùng ngày" với posted_at đã normalize.',
         validation_alias=AliasChoices("target_date", "targetDate", "ngay", "Ngày"),
     )
-    crawler_type: Literal["playwright", "apify"] = Field(
-        default="playwright",
+    crawler_type: Literal["auto", "playwright", "apify"] = Field(
+        default="auto",
         validation_alias=AliasChoices("crawler_type", "crawlerType"),
     )
     fallback_recent_count: int = Field(
