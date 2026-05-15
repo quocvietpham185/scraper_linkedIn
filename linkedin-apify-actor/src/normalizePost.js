@@ -2,7 +2,7 @@ export function parseCount(value) {
   if (value == null) return 0;
   const text = String(value).trim().toLowerCase();
   if (!text) return 0;
-  const compact = text.replace(/,/g, ".");
+  const compact = text.replace(/,/g, "");
   const match = compact.match(/([\d.]+)\s*([km])?/i);
   if (!match) return 0;
   const base = Number.parseFloat(match[1]);

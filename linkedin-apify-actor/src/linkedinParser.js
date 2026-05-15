@@ -61,11 +61,57 @@ export async function findPostLocator(page) {
 function metricFromText(text, labels) {
   const normalized = text.replace(/\s+/g, ' ').trim().toLowerCase();
   for (const label of labels) {
-    const re = new RegExp(`([\\d,.]+\\s*[km]?)\\s+${label}`, 'i');
+    const re = new RegExp(`([\\d,.]+\\s*[km]?)\\s+${label}\\b`, 'i');
     const match = normalized.match(re);
     if (match) return match[1];
   }
   return '';
+}
+
+function metricFromAccessibleText(text, labels) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  for (const label of labels) {
+    const before = normalized.match(new RegExp(`([\\d,.]+\\s*[km]?)\\s+${label}\\b`, 'i'));
+    if (before) return before[1];
+    const after = normalized.match(new RegExp(`${label}\\D+([\\d,.]+\\s*[km]?)`, 'i'));
+    if (after) return after[1];
+  }
+  return '';
+}
+
+async function extractPostUrl(item) {
+  const hrefs = await item.locator('a[href]').evaluateAll((nodes) =>
+    nodes
+      .map((node) => node.href || node.getAttribute('href') || '')
+      .filter(Boolean),
+  ).catch(() => []);
+
+  const preferred = hrefs.find((href) =>
+    /\/feed\/update\/|urn:li:activity|activity-\d+|\/posts\//i.test(href),
+  );
+  if (preferred) return preferred;
+
+  const dataId = await item.getAttribute('data-id').catch(() => '');
+  const urnMatch = String(dataId || '').match(/urn:li:activity:\d+/);
+  if (urnMatch) {
+    return `https://www.linkedin.com/feed/update/${urnMatch[0]}/`;
+  }
+  return '';
+}
+
+async function extractMetrics(item, text) {
+  const accessible = await item
+    .locator('[aria-label]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') || '').join('\n'))
+    .catch(() => '');
+  const combined = `${accessible}\n${text}`;
+  return {
+    likes:
+      metricFromAccessibleText(combined, ['reaction', 'reactions'])
+      || metricFromAccessibleText(combined, ['like', 'likes']),
+    comments: metricFromAccessibleText(combined, ['comment', 'comments']),
+    reposts: metricFromAccessibleText(combined, ['repost', 'reposts', 'share', 'shares']),
+  };
 }
 
 function extractPostedAtRaw(text) {
@@ -103,18 +149,15 @@ export async function parsePosts(page, { groupUrl, maxItems }) {
     const text = (await item.innerText({ timeout: 5000 }).catch(() => '')).trim();
     if (!text) continue;
 
-    const links = await item.locator('a[href*="/feed/update/"], a[href*="urn:li:activity"]').evaluateAll((nodes) =>
-      nodes.map((node) => node.href || node.getAttribute('href')).filter(Boolean),
-    ).catch(() => []);
-
     const author = text.split('\n').map((line) => line.trim()).find(Boolean) || '';
-    const postUrl = links[0] || '';
+    const postUrl = await extractPostUrl(item);
+    const metrics = await extractMetrics(item, text);
     const raw = {
       author,
       content: text,
-      likes: metricFromText(text, ['reaction', 'reactions', 'like', 'likes']),
-      comments: metricFromText(text, ['comment', 'comments']),
-      reposts: metricFromText(text, ['repost', 'reposts', 'share', 'shares']),
+      likes: metrics.likes || metricFromText(text, ['reaction', 'reactions', 'like', 'likes']),
+      comments: metrics.comments || metricFromText(text, ['comment', 'comments']),
+      reposts: metrics.reposts || metricFromText(text, ['repost', 'reposts', 'share', 'shares']),
       postUrl,
       postedAtRaw: extractPostedAtRaw(text),
     };

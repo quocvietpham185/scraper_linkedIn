@@ -99,6 +99,10 @@ const delayMinMs = Math.min(Math.max(toInt(input.delayMinMs, 5000), 5000), 12000
 const delayMaxMs = Math.min(Math.max(toInt(input.delayMaxMs, 12000), delayMinMs), 120000);
 const groupDelayMinMs = Math.min(Math.max(toInt(input.groupDelayMinMs, 300000), 0), 1800000);
 const groupDelayMaxMs = Math.min(Math.max(toInt(input.groupDelayMaxMs, 600000), groupDelayMinMs), 1800000);
+const requestHandlerTimeoutSecs = Math.min(
+  Math.max(Math.ceil((groupDelayMaxMs + scrollTimes * delayMaxMs + 180000) / 1000), 120),
+  2400,
+);
 const maxConcurrency = 1;
 const maxRequestRetries = 0;
 const storageState = buildStorageState(input);
@@ -140,7 +144,7 @@ const crawler = new PlaywrightCrawler({
     },
   },
   navigationTimeoutSecs: 120,
-  requestHandlerTimeoutSecs: 120,
+  requestHandlerTimeoutSecs,
   launchContext: {
     launcher: chromium,
     useIncognitoPages: true,
