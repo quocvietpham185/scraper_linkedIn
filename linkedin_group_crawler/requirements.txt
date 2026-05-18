@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-playwright
+playwright==1.60.0
 python-dotenv
 pydantic
 eval_type_backport

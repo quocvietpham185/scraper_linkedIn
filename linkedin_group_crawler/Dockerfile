@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dbus \
