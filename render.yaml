@@ -6,7 +6,7 @@ services:
     region: oregon
     healthCheckPath: /health
     
-    env:
+    envVars:
       - key: HEADLESS
         value: "true"
       - key: HOST
@@ -17,22 +17,26 @@ services:
         value: /app/storage/linkedin_state.json
       - key: USE_PERSISTENT_PROFILE
         value: "true"
+      - key: TMPDIR
+        value: /app/tmp
+      - key: TEMP
+        value: /app/tmp
+      - key: TMP
+        value: /app/tmp
       - key: APIFY_FALLBACK_ENABLED
         value: "true"
       - key: API_KEY
-        fromFile: /app/secrets/api_key.txt
-    
-    # Add these as GitHub secrets and link them in Render dashboard
-    # Or set them directly in Render dashboard:
-    envFrom:
+        sync: false
+
+      # Set these in the Render dashboard or during Blueprint creation.
       - key: APIFY_TOKEN
-        fromSecret: APIFY_TOKEN
+        sync: false
       - key: GOOGLE_SERVICE_ACCOUNT_JSON
-        fromSecret: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
-        fromSecret: TELEGRAM_BOT_TOKEN
+        sync: false
       - key: N8N_WEBHOOK_URL
-        fromSecret: N8N_WEBHOOK_URL
+        sync: false
 
     disk:
       - path: /app/storage

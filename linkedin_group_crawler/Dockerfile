@@ -14,6 +14,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8111 \
     HEADLESS=true \
     STATE_PATH=/app/storage/linkedin_state.json \
+    TMPDIR=/app/tmp \
+    TEMP=/app/tmp \
+    TMP=/app/tmp \
     CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000 \
     PLAYWRIGHT_CHROMIUM_LAUNCH_ARGS="--disable-gpu --disable-web-resources --disable-dev-shm-usage --no-sandbox --disable-setuid-sandbox --disable-infobars --disable-crash-reporter" \
     PLAYWRIGHT_DOWNLOAD_HOST=https://github.com
@@ -27,7 +30,7 @@ RUN pip install --upgrade pip setuptools wheel \
 
 COPY . .
 
-RUN mkdir -p /app/storage/session /app/storage/runtime /app/data/raw /app/data/output /tmp \
+RUN mkdir -p /app/storage/session /app/storage/runtime /app/data/raw /app/data/output /app/tmp /tmp \
     && chown -R pwuser:pwuser /app /tmp
 
 USER pwuser

@@ -13,6 +13,36 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _configure_runtime_temp_dir() -> None:
+    """Point temp-file APIs at a writable directory before Playwright starts."""
+
+    candidates = [
+        Path(os.getenv("TMPDIR", "")).expanduser() if os.getenv("TMPDIR") else None,
+        BASE_DIR / "tmp",
+        Path("/tmp"),
+    ]
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            test_path = candidate / ".write-test"
+            test_path.write_text("", encoding="utf-8")
+            test_path.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+        resolved = str(candidate)
+        os.environ["TMPDIR"] = resolved
+        os.environ["TEMP"] = resolved
+        os.environ["TMP"] = resolved
+        return
+
+
+_configure_runtime_temp_dir()
+
+
 def _parse_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
