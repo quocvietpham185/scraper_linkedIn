@@ -815,7 +815,7 @@ def check_saved_session(
             message="Đã tìm thấy session LinkedIn có cookie đăng nhập.",
         )
 
-    live = _verify_saved_session_live_sync(state_path, profile_dir)
+    live = _auth_executor.submit(_verify_saved_session_live_sync, state_path, profile_dir).result()
     return SessionStatusResult(
         email=email,
         session_id=normalized_session_id,

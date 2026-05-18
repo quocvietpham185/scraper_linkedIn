@@ -78,12 +78,86 @@ async def crawl_group_with_tiers(
 
     attempts: list[CrawlAttempt] = []
 
-    should_try_playwright = mode in ("auto", "playwright")
     should_try_own_apify = mode in ("auto", "apify") and settings.apify_own_actor_enabled
     should_try_third_party = (
         mode in ("auto", "apify")
         and settings.apify_3rd_party_fallback_enabled
     )
+    should_try_playwright = mode in ("auto", "playwright")
+
+    if should_try_own_apify:
+        own_result = await run_apify_crawler_for_group(
+            group_url,
+            kind="own",
+            email=email,
+            session_id=session_id,
+            max_items=max_items,
+            target_date=target_date,
+            scroll_times=scroll_times,
+        )
+        if own_result.get("success"):
+            attempts.append(
+                CrawlAttempt(
+                    "tier1_apify_own_actor",
+                    True,
+                    "ok",
+                    status=str(own_result.get("status") or "success"),
+                    error_type=own_result.get("error_type"),
+                    reached_group=bool(own_result.get("reached_group", True)),
+                    auth_required=bool(own_result.get("auth_required", False)),
+                    raw_posts_count=len(own_result.get("posts") or []),
+                )
+            )
+            return TieredCrawlResult(True, own_result, "apify_own_actor", attempts)
+        message = str(own_result.get("error") or "Apify own actor failed")
+        attempts.append(
+            CrawlAttempt(
+                "tier1_apify_own_actor",
+                False,
+                message,
+                status=str(own_result.get("status") or "failed"),
+                error_type=own_result.get("error_type"),
+                reached_group=bool(own_result.get("reached_group", False)),
+                auth_required=bool(own_result.get("auth_required", False)),
+            )
+        )
+        logger.warning("Tier 1 Apify own Actor failed for %s: %s", group_url, message)
+
+    if should_try_third_party:
+        third_result = await run_apify_crawler_for_group(
+            group_url,
+            kind="third_party",
+            max_items=max_items,
+            target_date=target_date,
+            scroll_times=scroll_times,
+        )
+        if third_result.get("success"):
+            attempts.append(
+                CrawlAttempt(
+                    "tier2_apify_3rd_party",
+                    True,
+                    "ok",
+                    status=str(third_result.get("status") or "success"),
+                    error_type=third_result.get("error_type"),
+                    reached_group=bool(third_result.get("reached_group", True)),
+                    auth_required=bool(third_result.get("auth_required", False)),
+                    raw_posts_count=len(third_result.get("posts") or []),
+                )
+            )
+            return TieredCrawlResult(True, third_result, "apify_3rd_party", attempts)
+        message = str(third_result.get("error") or "Apify third-party actor failed")
+        attempts.append(
+            CrawlAttempt(
+                "tier2_apify_3rd_party",
+                False,
+                message,
+                status=str(third_result.get("status") or "failed"),
+                error_type=third_result.get("error_type"),
+                reached_group=bool(third_result.get("reached_group", False)),
+                auth_required=bool(third_result.get("auth_required", False)),
+            )
+        )
+        logger.warning("Tier 2 Apify third-party Actor failed for %s: %s", group_url, message)
 
     if should_try_playwright:
         try:
@@ -100,7 +174,7 @@ async def crawl_group_with_tiers(
             raw_posts_count = len(item.get("posts") or [])
             attempts.append(
                 CrawlAttempt(
-                    "tier1_playwright_local",
+                    "tier3_playwright_local",
                     True,
                     "ok",
                     status="success",
@@ -120,7 +194,7 @@ async def crawl_group_with_tiers(
             error_type, auth_required = _classify_local_error(message)
             attempts.append(
                 CrawlAttempt(
-                    "tier1_playwright_local",
+                    "tier3_playwright_local",
                     False,
                     message,
                     status="failed",
@@ -129,88 +203,14 @@ async def crawl_group_with_tiers(
                     auth_required=auth_required,
                 )
             )
-            logger.warning("Tier 1 Playwright failed for %s: %s", group_url, message)
+            logger.warning("Tier 3 Playwright failed for %s: %s", group_url, message)
             if mode == "playwright":
                 return TieredCrawlResult(False, None, "", attempts)
-
-    if should_try_own_apify:
-        own_result = await run_apify_crawler_for_group(
-            group_url,
-            kind="own",
-            email=email,
-            session_id=session_id,
-            max_items=max_items,
-            target_date=target_date,
-            scroll_times=scroll_times,
-        )
-        if own_result.get("success"):
-            attempts.append(
-                CrawlAttempt(
-                    "tier2_apify_own_actor",
-                    True,
-                    "ok",
-                    status=str(own_result.get("status") or "success"),
-                    error_type=own_result.get("error_type"),
-                    reached_group=bool(own_result.get("reached_group", True)),
-                    auth_required=bool(own_result.get("auth_required", False)),
-                    raw_posts_count=len(own_result.get("posts") or []),
-                )
-            )
-            return TieredCrawlResult(True, own_result, "apify_own_actor", attempts)
-        message = str(own_result.get("error") or "Apify own actor failed")
-        attempts.append(
-            CrawlAttempt(
-                "tier2_apify_own_actor",
-                False,
-                message,
-                status=str(own_result.get("status") or "failed"),
-                error_type=own_result.get("error_type"),
-                reached_group=bool(own_result.get("reached_group", False)),
-                auth_required=bool(own_result.get("auth_required", False)),
-            )
-        )
-        logger.warning("Tier 2 Apify own Actor failed for %s: %s", group_url, message)
-
-    if should_try_third_party:
-        third_result = await run_apify_crawler_for_group(
-            group_url,
-            kind="third_party",
-            max_items=max_items,
-            target_date=target_date,
-            scroll_times=scroll_times,
-        )
-        if third_result.get("success"):
-            attempts.append(
-                CrawlAttempt(
-                    "tier3_apify_3rd_party",
-                    True,
-                    "ok",
-                    status=str(third_result.get("status") or "success"),
-                    error_type=third_result.get("error_type"),
-                    reached_group=bool(third_result.get("reached_group", True)),
-                    auth_required=bool(third_result.get("auth_required", False)),
-                    raw_posts_count=len(third_result.get("posts") or []),
-                )
-            )
-            return TieredCrawlResult(True, third_result, "apify_3rd_party", attempts)
-        message = str(third_result.get("error") or "Apify third-party actor failed")
-        attempts.append(
-            CrawlAttempt(
-                "tier3_apify_3rd_party",
-                False,
-                message,
-                status=str(third_result.get("status") or "failed"),
-                error_type=third_result.get("error_type"),
-                reached_group=bool(third_result.get("reached_group", False)),
-                auth_required=bool(third_result.get("auth_required", False)),
-            )
-        )
-        logger.warning("Tier 3 Apify third-party Actor failed for %s: %s", group_url, message)
 
     if mode == "apify" and not should_try_own_apify and not should_try_third_party:
         attempts.append(
             CrawlAttempt(
-                "tier2_apify_own_actor",
+                "tier1_apify_own_actor",
                 False,
                 "APIFY_OWN_ACTOR_ENABLED=false and third-party fallback disabled",
                 status="failed",

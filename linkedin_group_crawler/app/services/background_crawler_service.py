@@ -316,9 +316,9 @@ async def run_background_crawl(session_id: str, request: StartWorkflowRequest) -
                             group_item = third_result
                         else:
                             group_item["error"] = (
-                                f"tier2_apify_own_actor[{group_item.get('error_type') or 'failed'}]: "
+                                f"tier1_apify_own_actor[{group_item.get('error_type') or 'failed'}]: "
                                 f"{group_item.get('error') or 'Apify own actor failed'} | "
-                                f"tier3_apify_3rd_party[{third_result.get('error_type') or 'failed'}]: "
+                                f"tier2_apify_3rd_party[{third_result.get('error_type') or 'failed'}]: "
                                 f"{third_result.get('error') or 'Apify third-party actor failed'}"
                             )
 

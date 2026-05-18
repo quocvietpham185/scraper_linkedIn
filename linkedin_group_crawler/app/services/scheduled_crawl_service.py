@@ -99,9 +99,11 @@ async def run_scheduled_crawl_once() -> None:
             len(group_urls),
             settings.scheduled_crawler_type,
         )
-        crawl_task_service.create_task(crawl_id, email, len(group_urls))
         try:
+            crawl_task_service.create_task(crawl_id, email, len(group_urls))
             await run_background_crawl(crawl_id, request)
+        except RuntimeError as exc:
+            logger.warning("Scheduled crawl skipped for account %s: %s", email, exc)
         except Exception:
             logger.exception("Scheduled crawl failed for account %s", email)
 

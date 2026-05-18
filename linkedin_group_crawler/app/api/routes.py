@@ -14,6 +14,7 @@ from typing_extensions import Annotated
 import httpx
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, status, BackgroundTasks
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.config import BASE_DIR, settings
 from app.schemas.request_models import (
@@ -387,14 +388,12 @@ def linkedin_session_status(payload: SessionStatusRequest) -> dict[str, Any]:
 
 
 @router.post("/crawl-linkedin-group", response_model=CrawlResponse, dependencies=[Depends(verify_api_key)])
-def crawl_linkedin_group(payload: CrawlGroupRequest) -> CrawlResponse:
+async def crawl_linkedin_group(payload: CrawlGroupRequest) -> CrawlResponse:
     """Crawl một nhóm: trả **toàn bộ** bài đúng ngày mục tiêu; không có thì **N** bài gần nhất (cho n8n).
 
     Option A: Nếu Playwright thất bại và APIFY_FALLBACK_ENABLED=true, tự động thử lại bằng Apify API.
     """
     live_feed_service.add_event("crawl_start", payload.email or "Hệ thống", f"Bắt đầu cào dữ liệu từ nhóm: {payload.group_url}")
-    import asyncio
-
     try:
         if not payload.session_id and not payload.email:
             return CrawlResponse(
@@ -403,12 +402,82 @@ def crawl_linkedin_group(payload: CrawlGroupRequest) -> CrawlResponse:
                 data=None,
             )
 
+        tiered = await crawl_group_with_tiers(
+            group_url=payload.group_url,
+            mode="auto",
+            session_id=payload.session_id,
+            email=payload.email,
+            max_items=payload.max_items,
+            target_date=payload.target_date,
+        )
+        if not tiered.success or not tiered.group_item:
+            return CrawlResponse(
+                success=False,
+                message=tiered.error_summary or "All crawler tiers failed",
+                data=None,
+            )
+
+        group_item = tiered.group_item
+        raw_posts = list(group_item.get("posts") or [])
+        crawl_time = group_item.get("crawl_time") or datetime.now()
+        filtered_posts, target_day = enrich_and_filter_posts(
+            posts=raw_posts,
+            target_date=payload.target_date,
+            crawl_time=crawl_time,
+        )
+        posts_out = filtered_posts or select_most_recent_posts(
+            raw_posts,
+            limit=payload.fallback_recent_count,
+        )
+        top_post = pick_top_post(posts_out) if posts_out else None
+        if not posts_out:
+            return CrawlResponse(
+                success=False,
+                message=f"{tiered.source} did not return posts for {payload.group_url}",
+                data=None,
+            )
+
+        response_data = CrawlDataResponse(
+            session_id=str(group_item.get("session_id") or payload.session_id or tiered.source),
+            group_url=payload.group_url,
+            group_name=str(group_item.get("group_name") or ""),
+            target_date=target_day.isoformat(),
+            email=payload.email,
+            total_posts_scraped=int(
+                group_item.get("total_posts_scraped")
+                or group_item.get("raw_posts_count")
+                or len(raw_posts)
+            ),
+            total_posts_in_target_date=len(filtered_posts),
+            top_post=TopPostResponse.from_post_dict(top_post) if top_post else None,
+            posts=[TopPostResponse.from_post_dict(p) for p in posts_out],
+            selection_mode="target_day" if filtered_posts else "fallback_recent",
+        )
+
+        if payload.email and posts_out:
+            try:
+                seeding_task_service.add_seeding_tasks_bulk(
+                    email=payload.email,
+                    posts=posts_out,
+                    group_name=str(group_item.get("group_name") or "Unknown Group"),
+                    group_url=payload.group_url,
+                )
+            except Exception as exc:
+                logger.error("Failed to auto-add seeding tasks: %s", exc)
+
+        return CrawlResponse(
+            success=True,
+            message=f"Crawl OK via {tiered.source} - {len(posts_out)} posts",
+            data=response_data,
+        )
+
         playwright_error: Exception | None = None
         crawl_result = None
 
         # ── Phương án 1: Playwright ──────────────────────────────
         try:
-            crawl_result = open_group_and_collect_posts(
+            crawl_result = await run_in_threadpool(
+                open_group_and_collect_posts,
                 session_id=payload.session_id,
                 email=payload.email,
                 group_url=payload.group_url,
@@ -443,31 +512,13 @@ def crawl_linkedin_group(payload: CrawlGroupRequest) -> CrawlResponse:
                 payload.group_url,
                 playwright_error,
             )
-            try:
-                apify_result = asyncio.get_event_loop().run_until_complete(
-                    run_apify_crawler_for_group(
-                        payload.group_url,
-                        email=payload.email,
-                        session_id=payload.session_id,
-                        max_items=payload.max_items,
-                        target_date=payload.target_date,
-                    )
-                )
-            except RuntimeError:
-                # FastAPI sync endpoint: tạo event loop mới nếu cần
-                loop = asyncio.new_event_loop()
-                try:
-                    apify_result = loop.run_until_complete(
-                        run_apify_crawler_for_group(
-                            payload.group_url,
-                            email=payload.email,
-                            session_id=payload.session_id,
-                            max_items=payload.max_items,
-                            target_date=payload.target_date,
-                        )
-                    )
-                finally:
-                    loop.close()
+            apify_result = await run_apify_crawler_for_group(
+                payload.group_url,
+                email=payload.email,
+                session_id=payload.session_id,
+                max_items=payload.max_items,
+                target_date=payload.target_date,
+            )
 
             if not apify_result.get("success"):
                 return CrawlResponse(
