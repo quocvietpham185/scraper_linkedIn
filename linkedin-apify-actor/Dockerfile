@@ -4,7 +4,7 @@ USER root
 WORKDIR /home/myuser/src
 
 RUN mkdir -p /home/myuser/src \
-	&& chown -R myuser:myuser /home/myuser
+    && chown -R myuser:myuser /home/myuser
 
 USER myuser
 
