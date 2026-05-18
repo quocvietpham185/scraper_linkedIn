@@ -56,7 +56,14 @@ def _normalize_header_cell(value: str) -> str:
 
 def _credential_path() -> Path:
     path = Path(settings.google_service_account_json_path)
+    if str(path) in {"", "."}:
+        raise ValueError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON looks like inline JSON but could not be parsed. "
+            "Use one-line valid JSON, or set this variable to a real credentials file path.",
+        )
     if path.exists():
+        if path.is_dir():
+            raise ValueError(f"GOOGLE_SERVICE_ACCOUNT_JSON points to a directory, not a file: {path.as_posix()}")
         return path
     raise FileNotFoundError(
         f"Không thấy file service account GOOGLE_SERVICE_ACCOUNT_JSON: {path.as_posix()}",
@@ -69,13 +76,15 @@ def _service_account_info_from_env() -> dict[str, Any] | None:
         return None
 
     candidates = [raw, raw.strip().strip("'\"")]
+    saw_json_like_value = False
     for candidate in candidates:
         candidate = candidate.strip()
         if not candidate.startswith("{"):
             continue
+        saw_json_like_value = True
         try:
             info = json.loads(candidate)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             continue
         if not isinstance(info, dict):
             raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON must be a JSON object")
@@ -83,6 +92,12 @@ def _service_account_info_from_env() -> dict[str, Any] | None:
         if isinstance(private_key, str):
             info["private_key"] = private_key.replace("\\n", "\n")
         return info
+
+    if saw_json_like_value:
+        raise ValueError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON. "
+            "Paste a single-line JSON value with private_key newlines escaped as \\n.",
+        )
 
     return None
 
