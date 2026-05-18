@@ -15,58 +15,112 @@
       "type": "integer",
       "description": "Maximum number of post items to collect from each group.",
       "minimum": 1,
-      "maximum": 500,
-      "default": 100
+      "maximum": 5000,
+      "default": 250
+    },
+    "mode": {
+      "title": "Crawl mode",
+      "type": "string",
+      "description": "Crawl strategy: 'api' = fast HTTP API pagination (no browser), 'auth' = Playwright browser with login, 'public' = unauthenticated Playwright, 'auto' = smart fallback.",
+      "editor": "select",
+      "enum": ["api", "auto", "auth", "public"],
+      "default": "api"
+    },
+    "apiMode": {
+      "title": "Use API pagination mode",
+      "type": "boolean",
+      "description": "When enabled, uses LinkedIn's internal API with paginationToken instead of browser scrolling. Much faster (~35-39 posts/request, no browser). Requires valid session cookies.",
+      "default": true
+    },
+    "iterations": {
+      "title": "Pagination iterations",
+      "type": "integer",
+      "description": "Number of API pages to fetch per group (API mode only). Each page returns ~35-39 posts. 6 iterations = ~200 posts.",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 6
+    },
+    "pageDelayMinMs": {
+      "title": "Min delay between pages (ms)",
+      "type": "integer",
+      "description": "Minimum wait between API page requests in milliseconds.",
+      "minimum": 0,
+      "maximum": 30000,
+      "default": 500
+    },
+    "pageDelayMaxMs": {
+      "title": "Max delay between pages (ms)",
+      "type": "integer",
+      "description": "Maximum wait between API page requests in milliseconds.",
+      "minimum": 0,
+      "maximum": 30000,
+      "default": 1500
+    },
+    "maxRetries": {
+      "title": "Max retries per page",
+      "type": "integer",
+      "description": "Retry count for a failed API page before giving up.",
+      "minimum": 0,
+      "maximum": 10,
+      "default": 5
+    },
+    "maxConsecutiveFailedPages": {
+      "title": "Max consecutive failed pages",
+      "type": "integer",
+      "description": "Stop a group crawl if this many pages fail consecutively.",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 3
+    },
+    "fetchTimeoutMs": {
+      "title": "Fetch timeout (ms)",
+      "type": "integer",
+      "description": "HTTP timeout per API request in milliseconds.",
+      "minimum": 5000,
+      "maximum": 60000,
+      "default": 20000
     },
     "targetDate": {
       "title": "Target date",
       "type": "string",
-      "description": "Optional YYYY-MM-DD date. The Actor still returns all collected posts; backend applies final filtering.",
+      "description": "Optional YYYY-MM-DD date. Backend applies final filtering.",
       "editor": "textfield"
     },
     "scrollTimes": {
-      "title": "Scroll times",
+      "title": "Scroll times (browser mode only)",
       "type": "integer",
-      "description": "Maximum number of scroll actions performed on each group page.",
+      "description": "Maximum scroll actions per group page (browser mode only).",
       "minimum": 1,
       "maximum": 80,
       "default": 8
     },
     "delayMinMs": {
-      "title": "Minimum delay between scrolls",
+      "title": "Min delay between scrolls (browser mode)",
       "type": "integer",
-      "description": "Minimum randomized wait time in milliseconds after each scroll.",
+      "description": "Minimum wait after each scroll in milliseconds (browser mode only).",
       "minimum": 0,
       "maximum": 120000,
       "default": 1000
     },
     "delayMaxMs": {
-      "title": "Maximum delay between scrolls",
+      "title": "Max delay between scrolls (browser mode)",
       "type": "integer",
-      "description": "Maximum randomized wait time in milliseconds after each scroll.",
+      "description": "Maximum wait after each scroll in milliseconds (browser mode only).",
       "minimum": 0,
       "maximum": 120000,
       "default": 2500
     },
-    "maxConcurrency": {
-      "title": "Max concurrency",
-      "type": "integer",
-      "description": "Maximum number of group pages crawled in parallel. Keep this low to reduce blocking.",
-      "minimum": 1,
-      "maximum": 3,
-      "default": 1
-    },
     "sessionCookie": {
       "title": "LinkedIn li_at cookie",
       "type": "string",
-      "description": "Optional LinkedIn li_at cookie value.",
+      "description": "Optional LinkedIn li_at session cookie value.",
       "editor": "textfield",
       "isSecret": true
     },
     "storageStateJson": {
       "title": "Playwright storage state JSON",
       "type": "string",
-      "description": "Optional Playwright storage state as a JSON string with cookies/localStorage.",
+      "description": "Playwright storage state JSON (cookies + localStorage). Strongly recommended — include JSESSIONID for proper CSRF token in API mode.",
       "editor": "textarea"
     },
     "proxyConfiguration": {

@@ -33,6 +33,10 @@ $Files = @(
         RemoteDir = "$RemoteProject/app/services/"
     },
     @{
+        Local = "linkedin_group_crawler/app/services/auth_service.py"
+        RemoteDir = "$RemoteProject/app/services/"
+    },
+    @{
         Local = "linkedin_group_crawler/app/config.py"
         RemoteDir = "$RemoteProject/app/"
     },
@@ -51,9 +55,18 @@ $Files = @(
 )
 
 if ($PushApifyActor) {
-    $Files += @{
-        Local = "linkedin-apify-actor/src/main.js"
-        RemoteDir = "$RemoteRoot/linkedin-apify-actor/src/"
+    @("Dockerfile", ".dockerignore", "package.json", "package-lock.json") | ForEach-Object {
+        $Files += @{
+            Local = "linkedin-apify-actor/$_"
+            RemoteDir = "$RemoteRoot/linkedin-apify-actor/"
+        }
+    }
+
+    Get-ChildItem -Path (Join-Path $RepoRoot "linkedin-apify-actor/src") -Filter "*.js" | ForEach-Object {
+        $Files += @{
+            Local = "linkedin-apify-actor/src/$($_.Name)"
+            RemoteDir = "$RemoteRoot/linkedin-apify-actor/src/"
+        }
     }
 }
 
@@ -88,11 +101,12 @@ updates = {
     "APIFY_DEFAULT_SCROLL_TIMES": "3",
     "APIFY_DELAY_MIN_MS": "5000",
     "APIFY_DELAY_MAX_MS": "12000",
-    "APIFY_BATCH_SIZE": "5",
-    "APIFY_GROUP_DELAY_MIN_SEC": "300",
-    "APIFY_GROUP_DELAY_MAX_SEC": "600",
-    "BACKEND_BATCH_DELAY_MIN_SEC": "900",
-    "BACKEND_BATCH_DELAY_MAX_SEC": "1800",
+    "APIFY_MODE": "auto",
+    "APIFY_BATCH_SIZE": "2",
+    "APIFY_GROUP_DELAY_MIN_SEC": "5",
+    "APIFY_GROUP_DELAY_MAX_SEC": "15",
+    "BACKEND_BATCH_DELAY_MIN_SEC": "600",
+    "BACKEND_BATCH_DELAY_MAX_SEC": "1200",
     "CRAWL_BATCH_GROUP_DELAY_MIN_SEC": "30",
     "CRAWL_BATCH_GROUP_DELAY_MAX_SEC": "90",
     "SCHEDULED_CRAWL_ENABLED": "__ENABLE_SCHEDULE__",
@@ -136,7 +150,7 @@ pm2 restart "__PM2_PROCESS__" --update-env || pm2 restart "__PM2_PROCESS__"
     if ($PushApifyActor) {
         $RemoteActorDirQuoted = ConvertTo-ShellSingleQuoted "$RemoteRoot/linkedin-apify-actor"
         Write-Host "Pushing Apify actor from VM"
-        & ssh @SshArgs $Target "cd $RemoteActorDirQuoted && apify push"
+        & ssh @SshArgs $Target "cd $RemoteActorDirQuoted && if command -v apify >/dev/null 2>&1; then apify push; else npx -y apify-cli push; fi"
     }
 }
 finally {

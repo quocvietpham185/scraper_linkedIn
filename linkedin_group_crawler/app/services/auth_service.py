@@ -31,7 +31,13 @@ EMAIL_SELECTORS = [
     'input#email-or-phone',
     'input[name="username"]',
     'input[autocomplete="username"]',
+    'input[autocomplete="email"]',
     'input[type="email"]',
+    'input[type="tel"]',
+    'input[placeholder*="Email" i]',
+    'input[placeholder*="phone" i]',
+    'input[aria-label*="Email" i]',
+    'input[aria-label*="phone" i]',
     'input[type="text"]',
 ]
 PASSWORD_SELECTORS = [
@@ -48,6 +54,8 @@ SUBMIT_SELECTORS = [
     'button._0290c384:has-text("Sign in")',
     'button:has-text("Sign in")',
     'button:has-text("Log in")',
+    'button:has-text("Continue")',
+    'button:has-text("Next")',
 ]
 
 OTP_INPUT_SELECTOR = "#input__email_verification_pin"
@@ -210,7 +218,70 @@ def _is_authwall_url(current_url: str) -> bool:
 
     parsed = urlparse((current_url or "").strip())
     path = (parsed.path or "").lower()
-    return any(path.startswith(prefix) for prefix in ["/login", "/checkpoint", "/authwall"])
+    return any(
+        path.startswith(prefix)
+        for prefix in [
+            "/login",
+            "/uas/login",
+            "/checkpoint",
+            "/authwall",
+            "/challenge",
+            "/security",
+        ]
+    )
+
+
+def _safe_page_title(page: Page) -> str:
+    try:
+        return page.title().strip()
+    except Exception:
+        return ""
+
+
+def _safe_body_text(page: Page, max_chars: int = 5000) -> str:
+    try:
+        text = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+        return ""
+    return text[:max_chars]
+
+
+def _is_manual_verification_page(page: Page) -> bool:
+    """Detect LinkedIn pages where automation should stop and let the user verify."""
+
+    current_url = page.url or ""
+    title = _safe_page_title(page).lower()
+    body = _safe_body_text(page).lower()
+    combined = f"{current_url}\n{title}\n{body}"
+    return any(
+        token in combined
+        for token in [
+            "captcha",
+            "checkpoint",
+            "security verification",
+            "quick security check",
+            "verify your identity",
+            "verification code",
+            "two-step verification",
+            "two step verification",
+            "enter the code",
+            "prove you're not a robot",
+            "unusual activity",
+            "let's do a quick security check",
+        ]
+    )
+
+
+def _goto_linkedin(page: Page, url: str, *, timeout: int = 60000) -> None:
+    """Navigate without hard failing on slow LinkedIn loads."""
+
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+    except TimeoutError:
+        logger.warning("LinkedIn navigation timed out but continuing: url=%s current=%s", url, page.url)
+    except Error:
+        logger.warning("LinkedIn navigation failed: url=%s current=%s", url, page.url, exc_info=True)
+        raise
 
 
 def _has_li_at_cookie(storage_state: dict) -> bool:
@@ -367,7 +438,7 @@ def _find_submit_button(page: Page) -> Locator | None:
                 try:
                     candidate.wait_for(state="visible", timeout=3000)
                     text = candidate.inner_text(timeout=1000).strip().lower()
-                    if text in {"sign in", "log in"}:
+                    if text in {"sign in", "log in", "continue", "next"}:
                         return candidate
                 except (TimeoutError, Error):
                     continue
@@ -378,12 +449,12 @@ def _find_submit_button(page: Page) -> Locator | None:
     if locator is not None:
         try:
             text = locator.inner_text(timeout=1000).strip().lower()
-            if text == "sign in" or text == "log in":
+            if text in {"sign in", "log in", "continue", "next"}:
                 return locator
         except Error:
             logger.debug("Could not read candidate submit button text", exc_info=True)
 
-    for button_text in ["Sign in", "Log in"]:
+    for button_text in ["Sign in", "Log in", "Continue", "Next"]:
         try:
             buttons = page.get_by_role("button", name=button_text, exact=True)
             for index in range(buttons.count()):
@@ -436,6 +507,38 @@ def _fill_login_form(page: Page, email: str, password: str, max_retries: int = 2
             _set_input_value(email_input, email)
             _set_input_value(password_input, password)
 
+            submit_button = _find_submit_button(page)
+            if submit_button is not None:
+                submit_button.click(force=True)
+            else:
+                password_input.press("Enter")
+            return True
+
+        if email_input is not None and password_input is None:
+            logger.info("Found email field without password field; submitting first login step")
+            _set_input_value(email_input, email)
+            submit_button = _find_submit_button(page)
+            if submit_button is not None:
+                submit_button.click(force=True)
+            else:
+                email_input.press("Enter")
+            try:
+                page.wait_for_timeout(2500)
+            except Error:
+                pass
+            password_input = _find_password_input(page)
+            if password_input is not None:
+                _set_input_value(password_input, password)
+                submit_button = _find_submit_button(page)
+                if submit_button is not None:
+                    submit_button.click(force=True)
+                else:
+                    password_input.press("Enter")
+                return True
+
+        if email_input is None and password_input is not None:
+            logger.info("Found password field only; filling password and submitting")
+            _set_input_value(password_input, password)
             submit_button = _find_submit_button(page)
             if submit_button is not None:
                 submit_button.click(force=True)
@@ -497,6 +600,50 @@ def _wait_for_login_session(page: Page, context: BrowserContext, timeout_ms: int
         "LinkedIn login did not produce a reusable session in time. "
         "Check data/raw/login_session_not_ready.html and .png."
     )
+
+
+def _try_save_existing_browser_session(page: Page, context: BrowserContext, state_path: Path) -> bool:
+    """Reuse an already-authenticated persistent profile before touching LinkedIn login."""
+
+    try:
+        logger.info("Checking existing LinkedIn browser session before login form")
+        _goto_linkedin(page, "https://www.linkedin.com/feed/", timeout=45000)
+        page.wait_for_timeout(2500)
+        if _context_has_li_at_cookie(context) and not _is_authwall_url(page.url):
+            logger.info("Existing browser profile is already authenticated; saving storage state")
+            _save_session_state(context, state_path)
+            return True
+    except Exception:
+        logger.debug("Existing browser session check did not find a reusable login", exc_info=True)
+    return False
+
+
+def _open_login_form(page: Page) -> bool:
+    """Open a LinkedIn login surface and return True if a credential form is present."""
+
+    login_urls = [
+        "https://www.linkedin.com/login",
+        "https://www.linkedin.com/uas/login",
+        "https://www.linkedin.com/checkpoint/lg/sign-in-another-account",
+    ]
+    for url in login_urls:
+        logger.info("Opening LinkedIn login page: %s", url)
+        _goto_linkedin(page, url, timeout=60000)
+        try:
+            page.wait_for_timeout(2500)
+        except Error:
+            pass
+        if _find_email_input(page) is not None or _find_password_input(page) is not None:
+            return True
+        if _is_manual_verification_page(page):
+            logger.warning(
+                "LinkedIn is showing a manual verification/challenge page instead of a login form. "
+                "url=%s title=%s",
+                page.url,
+                _safe_page_title(page),
+            )
+            return False
+    return False
 
 
 def _is_feed_or_group_url(current_url: str) -> bool:
@@ -845,25 +992,39 @@ def _login_and_save_session_sync(
     keep_open_for_verify = False
 
     try:
-        logger.info("Opening LinkedIn login page")
-        page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=120000)
-        page.wait_for_timeout(3000)
+        if _try_save_existing_browser_session(page, context, state_path):
+            return LoginFlowResult(status="success", session_id=normalized_session_id, state_path=state_path, email=email.strip().lower())
+
+        login_form_visible = _open_login_form(page)
 
         # Check if already logged in (user might have logged in manually or cookies exist)
         if _context_has_li_at_cookie(context) and not _is_authwall_url(page.url):
             logger.info("Detected existing session or manual login success; skipping form fill")
             _save_session_state(context, state_path)
-            return LoginFlowResult(status="success", session_id=normalized_session_id, state_path=state_path, email=email)
+            return LoginFlowResult(status="success", session_id=normalized_session_id, state_path=state_path, email=email.strip().lower())
+
+        if not login_form_visible and _is_manual_verification_page(page):
+            _capture_login_artifacts(page, "login_manual_verification_required")
+            if settings.headless:
+                raise RuntimeError(
+                    "LinkedIn đang hiển thị CAPTCHA/checkpoint nên không có ô email/mật khẩu để tự động điền. "
+                    "Hãy đăng nhập thủ công trên VM với HEADLESS=false hoặc profile Chrome thật, hoàn tất xác minh, "
+                    "rồi chạy lại để hệ thống lưu session. Screenshot: data/raw/login_manual_verification_required.png"
+                )
+            _wait_for_manual_verification_until_ready(page, timeout_ms=300000)
+            if _context_has_li_at_cookie(context) and not _is_authwall_url(page.url):
+                _save_session_state(context, state_path)
+                return LoginFlowResult(status="success", session_id=normalized_session_id, state_path=state_path, email=email.strip().lower())
 
         form_filled = _fill_login_form(page, email=email, password=password)
 
         if not form_filled:
-            # Form không tìm thấy → không cần chờ 5-10 phút, đóng browser ngay và báo lỗi rõ ràng
             _capture_login_artifacts(page, "login_form_not_found")
             raise RuntimeError(
                 "Không tìm thấy ô email/mật khẩu trên trang đăng nhập LinkedIn sau nhiều lần thử. "
-                "LinkedIn có thể đang hiển thị CAPTCHA, giao diện mới, hoặc đang chặn đăng nhập tự động. "
-                "Vui lòng thử lại sau vài phút. Screenshot: data/raw/login_form_not_found.png"
+                f"URL hiện tại: {page.url}. Title: {_safe_page_title(page)}. "
+                "Nếu LinkedIn đang hiển thị CAPTCHA/checkpoint, cần đăng nhập thủ công một lần trên VM rồi chạy lại. "
+                "Screenshot: data/raw/login_form_not_found.png"
             )
 
         try:

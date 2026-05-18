@@ -33,13 +33,12 @@ APIFY_SESSION_REJECTED_MESSAGE = (
     "Không crawl được do LinkedIn không chấp nhận session trên Apify.\n"
     "Vui lòng chạy bằng Playwright local VM hoặc đăng nhập lại profile.\n"
     "Cấu hình Apify nếu vẫn muốn thử: maxItems=20, scrollTimes=3, "
-    "delayMinMs=5000, delayMaxMs=12000, maxConcurrency=1, maxRequestRetries=0."
+    "delayMinMs=5000, delayMaxMs=12000, maxConcurrency=1, maxRequestRetries=1."
 )
 
 APIFY_SESSION_REJECTED_ERROR_TYPES = {
-    "AUTH_REQUIRED",
     "SESSION_INVALID",
-    "GROUP_REDIRECTED",
+    "SESSION_INVALID_GLOBAL",
 }
 
 
@@ -69,7 +68,7 @@ def _resolve_apify_token(kind: ActorKind) -> str:
 
 
 def _get_post_time_ms(post: dict[str, Any], now_ms: int) -> int:
-    dt = post.get("posted_at") or post.get("datetime") or post.get("date")
+    dt = post.get("posted_at") or post.get("day_up") or post.get("datetime") or post.get("date")
     if dt and dt not in ("null", "empty", ""):
         try:
             return int(datetime.fromisoformat(str(dt).replace("Z", "+00:00")).timestamp() * 1000)
@@ -114,9 +113,18 @@ def _load_storage_state_for_actor(
     if not email and not session_id:
         return None
 
-    _, state_path = build_session_state_path(session_id=session_id, email=email)
-    if not state_path.exists():
-        logger.info("No LinkedIn storage state found for Apify payload: %s", state_path)
+    candidate_paths: list[Any] = []
+    if email:
+        candidate_paths.append(build_session_state_path(session_id=None, email=email)[1])
+    if session_id:
+        candidate_paths.append(build_session_state_path(session_id=session_id, email=None)[1])
+
+    state_path = next((path for path in candidate_paths if path.exists()), None)
+    if state_path is None:
+        logger.info(
+            "No LinkedIn storage state found for Apify payload. Tried: %s",
+            ", ".join(str(path) for path in candidate_paths),
+        )
         return None
 
     try:
@@ -131,6 +139,13 @@ def _load_storage_state_for_actor(
     if not any(cookie.get("name") == "li_at" and cookie.get("value") for cookie in cookies if isinstance(cookie, dict)):
         logger.info("LinkedIn storage state for Apify is missing li_at: %s", state_path)
         return None
+    origins = state.get("origins") if isinstance(state, dict) else None
+    logger.info(
+        "Apify storage state loaded: path=%s cookies=%d origins=%d hasLiAt=true",
+        state_path,
+        len(cookies),
+        len(origins) if isinstance(origins, list) else 0,
+    )
     return state
 
 
@@ -139,12 +154,15 @@ def normalize_apify_post(post: dict[str, Any], original_url: str) -> dict[str, A
 
     post_url = (
         post.get("post_url")
+        or post.get("url_article")
         or post.get("url")
         or post.get("postUrl")
         or post.get("activityUrl")
         or ""
     )
     reposts = post.get("reposts")
+    if reposts is None:
+        reposts = post.get("repost")
     if reposts is None:
         reposts = post.get("share")
     if reposts is None:
@@ -157,8 +175,10 @@ def normalize_apify_post(post: dict[str, Any], original_url: str) -> dict[str, A
         "comments": _to_int(post.get("comments") or post.get("commentsCount") or post.get("commentCount")),
         "reposts": _to_int(reposts),
         "post_url": str(post_url),
-        "group_url": str(post.get("group_url") or post.get("groupUrl") or original_url),
-        "posted_at_raw": str(post.get("posted_at_raw") or post.get("text_date") or post.get("timestamp") or ""),
+        "group_url": str(post.get("group_url") or post.get("url_groups") or post.get("groupUrl") or original_url),
+        "group_name": str(post.get("group_name") or post.get("groupName") or ""),
+        "member_count": _to_int(post.get("member_count") or post.get("members") or post.get("memberCount")),
+        "posted_at_raw": str(post.get("posted_at_raw") or post.get("day_up") or post.get("text_date") or post.get("timestamp") or ""),
     }
 
 
@@ -180,6 +200,7 @@ def _extract_group_metadata(raw_posts: list[dict[str, Any]], group_url: str) -> 
 
         candidate_members = (
             post.get("member_count")
+            or post.get("members")
             or post.get("memberCount")
             or post.get("membersCount")
             or post.get("groupMembers")
@@ -218,12 +239,39 @@ def _first_actor_group_summary(summary: dict[str, Any] | None, group_url: str) -
     return {}
 
 
+def _actor_group_summary_is_failure(group_summary: dict[str, Any]) -> bool:
+    status = str(group_summary.get("status") or "").strip().lower()
+    if status and status not in {"success", "cache"}:
+        return True
+    return (
+        bool(group_summary.get("authRequired"))
+        or group_summary.get("reachedGroup") is False
+    )
+
+
+def _actor_summary_error_type(group_summary: dict[str, Any]) -> str:
+    explicit = str(group_summary.get("errorType") or "").strip()
+    if explicit:
+        return explicit
+    status = str(group_summary.get("status") or "").strip().lower()
+    status_map = {
+        "auth_required": "AUTH_REQUIRED",
+        "session_invalid": "SESSION_INVALID",
+        "session_invalid_global": "SESSION_INVALID",
+        "group_no_access": "GROUP_NO_ACCESS",
+        "empty_unverified": "EMPTY_UNVERIFIED_RESULT",
+        "timeout": "TIMEOUT",
+        "group_redirected": "GROUP_REDIRECTED",
+    }
+    return status_map.get(status, "CRAWL_ERROR")
+
+
 def _group_raw_posts_by_group_url(raw_posts: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for post in raw_posts:
         if not isinstance(post, dict):
             continue
-        raw_group_url = str(post.get("group_url") or post.get("groupUrl") or "").strip()
+        raw_group_url = str(post.get("group_url") or post.get("url_groups") or post.get("groupUrl") or "").strip()
         if not raw_group_url:
             continue
         grouped.setdefault(_normalize_url_for_compare(raw_group_url), []).append(post)
@@ -232,7 +280,9 @@ def _group_raw_posts_by_group_url(raw_posts: list[dict[str, Any]]) -> dict[str, 
 
 def _classify_apify_error(message: str) -> str:
     text = (message or "").lower()
-    if any(token in text for token in ("session invalid", "/uas/login", "uas/login")):
+    if any(token in text for token in ("group_no_access", "request to join", "not a member", "private group")):
+        return "GROUP_NO_ACCESS"
+    if any(token in text for token in ("session invalid", "session_invalid_global", "/uas/login", "uas/login")):
         return "SESSION_INVALID"
     if "final url: https://www.linkedin.com/" in text or "final url: /" in text:
         return "GROUP_REDIRECTED"
@@ -267,16 +317,38 @@ def _build_apify_proxy_configuration() -> dict[str, Any] | None:
     return proxy_configuration
 
 
+def _build_actor_account_id(email: Optional[str], session_id: Optional[str]) -> str:
+    return (email or session_id or "default").strip()
+
+
 def _humanize_apify_error(error_type: str | None, message: str) -> str:
     if _is_apify_session_rejected_error(error_type, message):
         return (
             f"{APIFY_SESSION_REJECTED_MESSAGE}\n"
             f"Chi tiết: {message}"
         )
+    if error_type == "GROUP_NO_ACCESS":
+        return (
+            "Tai khoan LinkedIn khong co quyen xem group nay hoac group dang yeu cau join/duyet thanh vien. "
+            f"Chi tiet: {message}"
+        )
+    if error_type == "TIMEOUT":
+        return (
+            "Apify Actor da vao duoc LinkedIn nhung bi timeout khi tai hoac parse trang. "
+            "Nen thu lai voi batch nho hon, navigationTimeoutMs=30000, waitUntil=commit, "
+            "va proxy residential sticky. "
+            f"Chi tiet: {message}"
+        )
     if error_type == "AUTH_REQUIRED":
         return (
-            "Apify Actor bị LinkedIn yêu cầu xác minh do môi trường/IP Apify. "
-            "Hãy chạy Playwright local hoặc đăng nhập lại session trên VM. "
+            "LinkedIn yêu cầu đăng nhập/xác minh riêng khi mở group này trên Apify. "
+            "Nếu /feed vẫn hợp lệ thì đây là lỗi theo group, không nhất thiết là hỏng toàn bộ session. "
+            f"Chi tiết: {message}"
+        )
+    if error_type == "GROUP_REDIRECTED":
+        return (
+            "LinkedIn redirect group về trang chủ/login khi chạy trên Apify. "
+            "Có thể account chưa có quyền xem group, group bị hạn chế, hoặc LinkedIn chặn bề mặt group trên môi trường Apify. "
             f"Chi tiết: {message}"
         )
     if error_type == "EMPTY_UNVERIFIED_RESULT":
@@ -307,15 +379,38 @@ def _build_actor_payload(
 
     payload = {
         "groupUrls": [group_url],
-        "maxItems": min(max_items or settings.apify_default_max_items, 20),
+        # FIX bug #5: enable API pagination mode
+        "mode": "api",
+        "apiMode": True,
+        "apiStart": 0,
+        "iterations": max(6, int(scroll_times or 6)),
+        "apiPageSize": 40,
+        "continueWithoutPaginationToken": True,
+        "maxItems": min(max(max_items or settings.apify_default_max_items or 250, 250), 500),
+        "maxRetries": 5,
+        "maxConsecutiveFailedPages": 3,
+        "pageDelayMinMs": 500,
+        "pageDelayMaxMs": 1500,
+        "fetchTimeoutMs": 20000,
+        # Session/identity
+        "sessionId": session_id or "",
+        "emailCrawl": email or "",
+        "accountId": _build_actor_account_id(email, session_id),
+        "stateStoreName": "linkedin-actor-state",
+        "allowCacheFallback": False,
+        "cacheTtlHours": 6,
+        "groupStateTtlHours": 24,
+        "sessionInvalidCooldownHours": 6,
         "targetDate": target_date or "",
+        # Browser scroll params (kept for backward compat, not used in apiMode)
         "scrollTimes": min(scroll_times or settings.apify_default_scroll_times, 3),
         "delayMinMs": max(settings.apify_delay_min_ms, 5000),
         "delayMaxMs": max(settings.apify_delay_max_ms, 12000),
+        "navigationTimeoutMs": 30000,
         "groupDelayMinMs": int(max(settings.apify_group_delay_min_sec, 0) * 1000),
         "groupDelayMaxMs": int(max(settings.apify_group_delay_max_sec, settings.apify_group_delay_min_sec, 0) * 1000),
         "maxConcurrency": 1,
-        "maxRequestRetries": 0,
+        "maxRequestRetries": 1,
     }
     proxy_configuration = _build_apify_proxy_configuration()
     if proxy_configuration:
@@ -337,15 +432,38 @@ def _build_own_actor_payload(
 ) -> dict[str, Any]:
     payload = {
         "groupUrls": group_urls,
-        "maxItems": min(max_items or settings.apify_default_max_items, 20),
+        # FIX bug #5: enable API pagination mode
+        "mode": "api",
+        "apiMode": True,
+        "apiStart": 0,
+        "iterations": max(6, int(scroll_times or 6)),
+        "apiPageSize": 40,
+        "continueWithoutPaginationToken": True,
+        "maxItems": min(max(max_items or settings.apify_default_max_items or 250, 250), 500),
+        "maxRetries": 5,
+        "maxConsecutiveFailedPages": 3,
+        "pageDelayMinMs": 500,
+        "pageDelayMaxMs": 1500,
+        "fetchTimeoutMs": 20000,
+        # Session/identity
+        "sessionId": session_id or "",
+        "emailCrawl": email or "",
+        "accountId": _build_actor_account_id(email, session_id),
+        "stateStoreName": "linkedin-actor-state",
+        "allowCacheFallback": False,
+        "cacheTtlHours": 6,
+        "groupStateTtlHours": 24,
+        "sessionInvalidCooldownHours": 6,
         "targetDate": target_date or "",
+        # Browser scroll params (kept for backward compat, not used in apiMode)
         "scrollTimes": min(scroll_times or settings.apify_default_scroll_times, 3),
         "delayMinMs": max(settings.apify_delay_min_ms, 5000),
         "delayMaxMs": max(settings.apify_delay_max_ms, 12000),
+        "navigationTimeoutMs": 30000,
         "groupDelayMinMs": int(max(settings.apify_group_delay_min_sec, 0) * 1000),
         "groupDelayMaxMs": int(max(settings.apify_group_delay_max_sec, settings.apify_group_delay_min_sec, 0) * 1000),
         "maxConcurrency": 1,
-        "maxRequestRetries": 0,
+        "maxRequestRetries": 1,
     }
     proxy_configuration = _build_apify_proxy_configuration()
     if proxy_configuration:
@@ -416,12 +534,8 @@ def _build_own_actor_group_result(
 ) -> dict[str, Any]:
     group_summary = _first_actor_group_summary(actor_summary, group_url)
 
-    if group_summary and (
-        group_summary.get("status") == "failed"
-        or group_summary.get("authRequired")
-        or group_summary.get("reachedGroup") is False
-    ):
-        error_type = str(group_summary.get("errorType") or "CRAWL_ERROR")
+    if group_summary and _actor_group_summary_is_failure(group_summary):
+        error_type = _actor_summary_error_type(group_summary)
         message = str(group_summary.get("message") or "Apify own actor failed")
         if error_type == "CRAWL_ERROR" and _is_apify_session_rejected_error(error_type, message):
             error_type = _classify_apify_error(message)
@@ -592,12 +706,8 @@ async def run_apify_crawler_for_group(
         raw_posts, actor_summary = await _run_actor_and_get_items(actor_id=actor_id, token=token, payload=payload)
         group_summary = _first_actor_group_summary(actor_summary, group_url)
 
-        if group_summary and (
-            group_summary.get("status") == "failed"
-            or group_summary.get("authRequired")
-            or group_summary.get("reachedGroup") is False
-        ):
-            error_type = str(group_summary.get("errorType") or "CRAWL_ERROR")
+        if group_summary and _actor_group_summary_is_failure(group_summary):
+            error_type = _actor_summary_error_type(group_summary)
             message = str(group_summary.get("message") or "Apify own actor failed")
             if error_type == "CRAWL_ERROR" and _is_apify_session_rejected_error(error_type, message):
                 error_type = _classify_apify_error(message)
