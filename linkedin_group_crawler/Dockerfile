@@ -27,8 +27,8 @@ RUN pip install --upgrade pip setuptools wheel \
 
 COPY . .
 
-RUN mkdir -p /app/storage/session /app/storage/runtime /app/data/raw /app/data/output \
-    && chown -R pwuser:pwuser /app
+RUN mkdir -p /app/storage/session /app/storage/runtime /app/data/raw /app/data/output /tmp \
+    && chown -R pwuser:pwuser /app /tmp
 
 USER pwuser
 
