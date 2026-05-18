@@ -369,7 +369,7 @@ export function useDashboardCrawler(): DashboardCrawlerValue {
     setFeedbackMessage(null);
     setErrorMessage(null);
     try {
-      const wantsLocalSession = params.crawler_type !== "apify";
+      const wantsLocalSession = params.crawler_type === "playwright";
       if (wantsLocalSession && params.email.trim()) {
         setFeedbackMessage("Đang kiểm tra session LinkedIn trước khi crawl...");
         const sessionResponse = await checkLinkedInSession({

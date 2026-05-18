@@ -149,9 +149,9 @@ export function CrawlerConfigCard() {
               }
               disabled={d.isCrawling}
             >
-              <option value="auto">Auto: Local → Actor → dự phòng</option>
+              <option value="auto">3 tier: Own Actor - Third-party Actor - Playwright</option>
               <option value="playwright">Chỉ Playwright local</option>
-              <option value="apify">Chỉ Apify Actor</option>
+              <option value="apify">Apify only: Own Actor - Third-party Actor</option>
             </select>
           </div>
           <div className="grid grid-cols-2 gap-md">

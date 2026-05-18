@@ -221,12 +221,12 @@ export function DashboardHomeContent() {
             </h3>
             <div className="space-y-4">
               <StatusRow
-                label="Playwright Engine"
+                label="Tier 3 Playwright"
                 status={isOnline ? 'Online' : 'Offline'}
                 color={isOnline ? 'bg-success' : 'bg-error'}
               />
               <StatusRow
-                label="Apify Fallback"
+                label="Tier 1-2 Apify Actors"
                 status="Standby"
                 color="bg-primary"
               />

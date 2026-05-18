@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime
 from pathlib import Path
@@ -63,6 +64,17 @@ def _credential_path() -> Path:
 
 
 def _build_credentials():
+    raw_json = (settings.google_service_account_json or "").strip()
+    if raw_json.startswith("{"):
+        try:
+            info = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON") from exc
+        return service_account.Credentials.from_service_account_info(
+            info,
+            scopes=_SHEETS_SCOPES,
+        )
+
     path = _credential_path()
     return service_account.Credentials.from_service_account_file(
         path.as_posix(),
@@ -190,6 +202,9 @@ def _sheet_a1(spreadsheet_id: str, tab_title: str, cell_range: str) -> str:
 
 def spreadsheet_configured() -> bool:
     spreadsheet_id_ok = bool((settings.google_spreadsheet_id or "").strip())
+    raw_json = (settings.google_service_account_json or "").strip()
+    if raw_json.startswith("{"):
+        return spreadsheet_id_ok
     json_path = Path(settings.google_service_account_json_path)
     return spreadsheet_id_ok and json_path.is_file()
 
@@ -582,4 +597,3 @@ def get_apify_token_from_settings_sheet() -> str:
         )
 
     return env_token
-

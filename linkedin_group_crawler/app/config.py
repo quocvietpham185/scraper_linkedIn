@@ -166,6 +166,8 @@ def _google_service_account_json_from_env() -> Path:
     """Đường dẫn file JSON service account (tương đối BASE_DIR hoặc absolute)."""
 
     raw = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
+    if raw.startswith("{"):
+        return Path("")
     if not raw:
         raw = "storage/permission/crawllinkedinapp-2e203d199c52.json"
     path = Path(raw)
@@ -243,6 +245,7 @@ class Settings:
     google_service_account_json_path: Path = field(
         default_factory=_google_service_account_json_from_env,
     )
+    google_service_account_json: str = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
     google_spreadsheet_id: str = field(default_factory=_google_spreadsheet_id_from_env)
     google_sheet_top_posts_tab: str = (os.getenv("GOOGLE_SHEET_TOP_POSTS_TAB") or "top_posts").strip()
     google_sheet_group_urls_tab: str = field(
