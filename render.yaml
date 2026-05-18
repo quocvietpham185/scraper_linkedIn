@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: linkedin-scraper-api
+    runtime: docker
+    dockerfilePath: ./linkedin_group_crawler/Dockerfile
+    region: oregon
+    healthCheckPath: /health
+    
+    env:
+      - key: HEADLESS
+        value: "true"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: CORS_ORIGINS
+        value: https://your-vercel-domain.vercel.app,https://your-custom-domain.com
+      - key: STATE_PATH
+        value: /app/storage/linkedin_state.json
+      - key: USE_PERSISTENT_PROFILE
+        value: "true"
+      - key: APIFY_FALLBACK_ENABLED
+        value: "true"
+      - key: API_KEY
+        fromFile: /app/secrets/api_key.txt
+    
+    # Add these as GitHub secrets and link them in Render dashboard
+    # Or set them directly in Render dashboard:
+    envFrom:
+      - key: APIFY_TOKEN
+        fromSecret: APIFY_TOKEN
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        fromSecret: GOOGLE_SERVICE_ACCOUNT_JSON
+      - key: TELEGRAM_BOT_TOKEN
+        fromSecret: TELEGRAM_BOT_TOKEN
+      - key: N8N_WEBHOOK_URL
+        fromSecret: N8N_WEBHOOK_URL
+
+    disk:
+      - path: /app/storage
+        sizeGb: 1
+      - path: /app/data
+        sizeGb: 2
+
+    plan: free
+
+    preDeployCommand: echo "Preparing deployment..."
+    buildCommand: |
+      cd linkedin_group_crawler && \
+      pip install --no-cache-dir -r requirements.txt

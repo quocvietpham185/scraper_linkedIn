@@ -1,0 +1,24 @@
+{
+  "buildCommand": "npm run build",
+  "framework": "nextjs",
+  "outputDirectory": ".next",
+  "root": "linkedin-crawler-ui",
+  "env": [
+    "NEXT_PUBLIC_LINKEDIN_CRAWLER_API_URL",
+    "NEXT_PUBLIC_LINKEDIN_CRAWLER_API_KEY",
+    "LINKEDIN_CRAWLER_INTERNAL_API_URL"
+  ],
+  "functions": {
+    "app/api/**": {
+      "memory": 1024,
+      "maxDuration": 300
+    }
+  },
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/vietpq-scraper",
+      "permanent": true
+    }
+  ]
+}
