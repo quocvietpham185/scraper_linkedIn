@@ -63,13 +63,33 @@ def _credential_path() -> Path:
     )
 
 
-def _build_credentials():
-    raw_json = (settings.google_service_account_json or "").strip()
-    if raw_json.startswith("{"):
+def _service_account_info_from_env() -> dict[str, Any] | None:
+    raw = (settings.google_service_account_json or "").strip()
+    if not raw:
+        return None
+
+    candidates = [raw, raw.strip().strip("'\"")]
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if not candidate.startswith("{"):
+            continue
         try:
-            info = json.loads(raw_json)
-        except json.JSONDecodeError as exc:
-            raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON") from exc
+            info = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(info, dict):
+            raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON must be a JSON object")
+        private_key = info.get("private_key")
+        if isinstance(private_key, str):
+            info["private_key"] = private_key.replace("\\n", "\n")
+        return info
+
+    return None
+
+
+def _build_credentials():
+    info = _service_account_info_from_env()
+    if info is not None:
         return service_account.Credentials.from_service_account_info(
             info,
             scopes=_SHEETS_SCOPES,
@@ -202,8 +222,7 @@ def _sheet_a1(spreadsheet_id: str, tab_title: str, cell_range: str) -> str:
 
 def spreadsheet_configured() -> bool:
     spreadsheet_id_ok = bool((settings.google_spreadsheet_id or "").strip())
-    raw_json = (settings.google_service_account_json or "").strip()
-    if raw_json.startswith("{"):
+    if _service_account_info_from_env() is not None:
         return spreadsheet_id_ok
     json_path = Path(settings.google_service_account_json_path)
     return spreadsheet_id_ok and json_path.is_file()

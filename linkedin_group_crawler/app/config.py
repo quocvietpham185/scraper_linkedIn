@@ -166,7 +166,8 @@ def _google_service_account_json_from_env() -> Path:
     """Đường dẫn file JSON service account (tương đối BASE_DIR hoặc absolute)."""
 
     raw = (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
-    if raw.startswith("{"):
+    normalized = raw.strip().strip("'\"")
+    if normalized.startswith("{") or "\\n" in normalized and "private_key" in normalized:
         return Path("")
     if not raw:
         raw = "storage/permission/crawllinkedinapp-2e203d199c52.json"
