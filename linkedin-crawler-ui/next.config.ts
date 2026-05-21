@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  basePath: "/minhhoang-scraper",
-  assetPrefix: "/minhhoang-scraper",
+  basePath: "/vietpq-scraper",
+  assetPrefix: "/vietpq-scraper",
   reactStrictMode: true,
   output: "standalone",
   images: {
